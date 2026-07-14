@@ -1,0 +1,7 @@
+{
+  "name": "@factory/prompts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Versioned prompt files. Never hardcode a prompt in TypeScript.",
+  "files": ["*.md"]
+}

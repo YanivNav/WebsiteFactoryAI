@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# env — never commit real keys
+.env
+.env.local
+.env.*.local
+
+# convex
+.convex/
+
+# per-project website checkouts — disposable, derived state.
+# A lost workspace is a lost cache, not a lost project: it is regenerated
+# from the approved specification + design, which live in Convex.
+workspaces/*
+!workspaces/.gitkeep
+
+# misc
+.DS_Store
+*.log
+
+/.idea/

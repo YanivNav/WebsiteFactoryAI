@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Native/binary build scripts we explicitly trust.
+#   sharp         → Next.js image optimization
+#   esbuild       → Convex + tsx
+#   unrs-resolver → ESLint resolver
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

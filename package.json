@@ -1,0 +1,21 @@
+{
+  "name": "website-factory-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @factory/web dev",
+    "convex": "convex dev",
+    "worker": "pnpm --filter @factory/worker dev",
+    "build": "pnpm --filter @factory/web build",
+    "typecheck": "pnpm -r --no-bail typecheck",
+    "lint": "pnpm --filter @factory/web lint"
+  },
+  "devDependencies": {
+    "convex": "^1.17.0",
+    "typescript": "^5.9.3"
+  }
+}
