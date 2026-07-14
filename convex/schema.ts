@@ -1,51 +1,169 @@
 /**
- * Convex is the state store, and it is the ONLY source of truth.
- *
- * It is not the worker. Convex actions have execution limits and no filesystem,
- * while code generation needs git, `npm install`, `wix build`, and an agent loop
- * over real files. So: Convex persists state and queues work; a separate Node
- * process leases that work and does it.
+ * Convex is the state store, and the ONLY source of truth.
  *
  * What lives here is *durable input* — brief, specification, design, approvals,
- * stage. The generated repository is *derived state*: a function of
- * (specification + design + config), reconstructible at any time. Losing a
- * workspace loses a cache, not a project.
+ * stage. The generated website repository is *derived state*: a function of
+ * (specification + design + config), reconstructible at any time. Losing a workspace
+ * loses a cache, not a project.
  *
  * The application must survive refreshes, restarts, and interruptions, because all
  * progress lives here and never in memory.
  *
- * PHASE 0: empty. The tables below are the Phase 1 target, written out so the shape
- * is agreed before a single mutation exists.
+ * NOTE THE SHAPE — it encodes the OCC guardrail from CLAUDE.md:
+ * `logs` is a separate append-only table precisely so the worker never has to
+ * hot-write the `projects` document while the dashboard is reading it.
  */
 
-import { defineSchema } from "convex/server";
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export const stageValidator = v.union(
+  v.literal("Draft"),
+  v.literal("GeneratingSpecification"),
+  v.literal("WaitingForSpecificationApproval"),
+  v.literal("GeneratingDesign"),
+  v.literal("WaitingForDesignApproval"),
+  v.literal("ProvisioningWix"),
+  v.literal("WaitingForManualActions"),
+  v.literal("GeneratingCode"),
+  v.literal("WaitingForCodeReview"),
+  v.literal("RunningChecks"),
+  v.literal("GeneratingPreview"),
+  v.literal("WaitingForFinalApproval"),
+  v.literal("Publishing"),
+  v.literal("Completed"),
+);
+
+export const artifactTypeValidator = v.union(
+  v.literal("brief"),
+  v.literal("specification"),
+  v.literal("design"),
+  v.literal("buildReport"),
+  v.literal("preview"),
+  v.literal("releaseReport"),
+);
 
 export default defineSchema({
-  // TODO(phase-1): define these tables.
-  //
-  // projects        title, owner, status, currentStage, brief,
-  //                 settings { mode, publishTarget, businessName, siteTemplate, solutions[] },
-  //                 wix { projectId, siteId, liveUrl, previewUrl },
-  //                 lease { workerId, expiresAt },   ← atomic; prevents double-execution
-  //                 attempts, lastError, createdAt, updatedAt
-  //
-  // artifacts       projectId, type, version, data, storageId?,
-  //                 promptHash, inputsHash, createdAt
-  //                 ← append-only. NEVER overwrite. Rejection produces v2, not a mutation.
-  //
-  // reviews         projectId, artifactId, artifactType, version, status,
-  //                 comments[], approvedBy, approvedAt
-  //
-  // manualTasks     projectId, stage, title, description, wixDashboardUrl,
-  //                 blocking, completed, completedAt
-  //
-  // changeRequests  projectId, description, status, createdAt
-  //                 ← the collaboration queue. Serialized by the worker's lease,
-  //                   so two people on two computers can never conflict.
-  //
-  // logs            projectId, stage, level, message, data, timestamp
-  //                 ← structured. The user-facing feed is DERIVED from these;
-  //                   never rely on raw AI messages for state.
-  //
-  // stageRuns       projectId, stage, attempt, status, startedAt, finishedAt, error
+  projects: defineTable({
+    title: v.string(),
+    owner: v.string(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("failed"),
+      v.literal("completed"),
+    ),
+    currentStage: stageValidator,
+    brief: v.string(),
+    settings: v.object({
+      mode: v.union(v.literal("simple"), v.literal("developer")),
+      publishTarget: v.union(v.literal("wix-managed"), v.literal("custom")),
+      businessName: v.optional(v.string()),
+      siteTemplate: v.optional(v.string()),
+    }),
+    wix: v.optional(
+      v.object({
+        projectId: v.optional(v.string()),
+        siteId: v.optional(v.string()),
+        liveUrl: v.optional(v.string()),
+        previewUrl: v.optional(v.string()),
+      }),
+    ),
+    // The atomic lease. This is what prevents two workers from executing the same
+    // stage — and the same serialization is what makes the change-request queue
+    // conflict-free, because there is only ever one writer per project.
+    leaseWorkerId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    attempts: v.number(),
+    lastError: v.optional(v.string()),
+  })
+    // Leasing scans by stage, so index it. `by_stage_lease` lets the worker find
+    // "runnable stage, and either unleased or the lease has expired" cheaply.
+    .index("by_stage", ["currentStage"])
+    .index("by_owner", ["owner"]),
+
+  // Append-only. NEVER overwrite. A rejected specification produces v2 — it does not
+  // mutate v1. `promptHash` + `inputsHash` are what make "deterministic from its
+  // inputs" an enforceable claim rather than a hopeful one.
+  artifacts: defineTable({
+    projectId: v.id("projects"),
+    type: artifactTypeValidator,
+    version: v.number(),
+    data: v.any(),
+    storageId: v.optional(v.id("_storage")), // blobs never live inside documents
+    promptHash: v.string(),
+    inputsHash: v.string(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_type", ["projectId", "type"]),
+
+  reviews: defineTable({
+    projectId: v.id("projects"),
+    artifactId: v.id("artifacts"),
+    artifactType: artifactTypeValidator,
+    version: v.number(),
+    status: v.union(
+      v.literal("waiting"),
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("needs_changes"),
+    ),
+    comments: v.array(v.string()),
+    approvedBy: v.optional(v.string()),
+    approvedAt: v.optional(v.number()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_artifact", ["artifactId"]),
+
+  manualTasks: defineTable({
+    projectId: v.id("projects"),
+    stage: stageValidator,
+    title: v.string(),
+    description: v.string(),
+    // Deep link into the exact Wix dashboard page. The user knows the Wix dashboard
+    // cold — send them somewhere they recognise, never "run this command".
+    wixDashboardUrl: v.optional(v.string()),
+    blocking: v.boolean(),
+    completed: v.boolean(),
+    completedAt: v.optional(v.number()),
+  }).index("by_project", ["projectId"]),
+
+  // The collaboration queue. Two people on two computers submit changes here; the
+  // worker's lease serializes them against one workspace. One writer, always — so
+  // merge conflicts are structurally impossible and never need resolving.
+  changeRequests: defineTable({
+    projectId: v.id("projects"),
+    description: v.string(),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("done"),
+      v.literal("failed"),
+    ),
+    requestedBy: v.string(),
+  }).index("by_project_status", ["projectId", "status"]),
+
+  // Structured logs. The user-facing activity feed is DERIVED from these — we never
+  // rely on raw AI chatter for state. Raw output stays here, behind "Technical
+  // details", for the operator.
+  logs: defineTable({
+    projectId: v.id("projects"),
+    stage: stageValidator,
+    level: v.union(v.literal("info"), v.literal("warn"), v.literal("error")),
+    message: v.string(),
+    data: v.optional(v.any()),
+  }).index("by_project", ["projectId"]),
+
+  stageRuns: defineTable({
+    projectId: v.id("projects"),
+    stage: stageValidator,
+    attempt: v.number(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("succeeded"),
+      v.literal("failed"),
+    ),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+  }).index("by_project", ["projectId"]),
 });
