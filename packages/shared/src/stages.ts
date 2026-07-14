@@ -89,6 +89,52 @@ export const STAGE_LABELS: Record<Stage, string> = {
  */
 export type ProjectMode = "simple" | "developer";
 
-// TODO(phase-1): transition table + gate policy resolution.
-//   nextStage(current: Stage, mode: ProjectMode): Stage
-// Deliberately not implemented during scaffolding.
+export const DEFAULT_MODE: ProjectMode = "simple";
+
+/**
+ * Is this stage part of the linear flow for the given mode?
+ *
+ * Two stages are special:
+ *
+ * - `WaitingForCodeReview` exists only in `developer` mode. A Wix merchant cannot
+ *   approve a diff, so in `simple` mode we skip straight from building to checking,
+ *   and the human judges the rendered preview instead.
+ *
+ * - `WaitingForManualActions` is NEVER auto-entered. The linear flow always skips it.
+ *   A project lands there only when a stage handler explicitly returns
+ *   `{ kind: "manualTasks" }` — i.e. when the work actually turned out to need a
+ *   human. If provisioning needs nothing from you, you are never asked for anything.
+ */
+function isStageInFlow(stage: Stage, mode: ProjectMode): boolean {
+  if (stage === "WaitingForCodeReview") return mode === "developer";
+  if (stage === "WaitingForManualActions") return false;
+  return true;
+}
+
+/**
+ * The transition table. `STAGES` is already declared in flow order, so "next" is
+ * simply the next enabled stage — there is no separate graph to keep in sync.
+ *
+ * This is a PURE FUNCTION, deliberately. It is the one piece of stage logic that both
+ * the worker and Convex need (the worker advances; an approval also advances), and
+ * duplicating it would be how the two drift apart. Keeping it pure and in `shared`
+ * means Convex mutations stay mechanical — see the portability guardrails in CLAUDE.md.
+ *
+ * `Completed` is a RESTING state, not a terminal one: it stays put here, and a
+ * ChangeRequest is what sends the project back to `GeneratingCode`.
+ */
+export function nextStage(current: Stage, mode: ProjectMode = DEFAULT_MODE): Stage {
+  if (current === "Completed") return "Completed";
+
+  const index = STAGES.indexOf(current);
+  if (index === -1) {
+    throw new Error(`Unknown stage: ${current}`);
+  }
+
+  for (let i = index + 1; i < STAGES.length; i++) {
+    const candidate = STAGES[i]!;
+    if (isStageInFlow(candidate, mode)) return candidate;
+  }
+
+  return "Completed";
+}
