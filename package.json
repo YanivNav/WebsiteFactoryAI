@@ -14,6 +14,9 @@
     "typecheck": "pnpm -r --no-bail typecheck",
     "lint": "pnpm --filter @factory/web lint"
   },
+  "dependencies": {
+    "@factory/shared": "workspace:*"
+  },
   "devDependencies": {
     "convex": "^1.17.0",
     "typescript": "^5.9.3"
