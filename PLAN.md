@@ -146,6 +146,67 @@ Blast radius of a migration, if those hold: implement `ProjectStore` against Pos
 
 ---
 
+## Clarifying questions (one textarea is not a brief)
+
+**The problem.** A user types *"a tea shop called Tea Top"* and we are expected to plan a
+website from it. We can't. The first prompt is almost never enough, and the gap gets
+silently papered over by the AI inventing assumptions — which then propagate all the way
+into the design and the code, where they are expensive to unwind. The specification stage
+would rather guess than ask, and guessing is the failure.
+
+**The fix.** Before planning, the system asks a few questions.
+
+```
+Draft
+  → GeneratingQuestions          (read the brief, work out what is genuinely missing)
+  → WaitingForAnswers        ⏸   "A few quick questions"
+  → GeneratingSpecification      (now sees brief + answers)
+```
+
+**Why this costs almost nothing to build.** It is just another gate. `Waiting*` stages are
+already non-runnable, so the pause falls out of the data model exactly like approvals and
+manual tasks do. No new mechanism, no pause/resume code, no special casing.
+
+**Four rules that make it good rather than annoying:**
+
+1. **Gap-driven, not blind.** The model is asked what it *cannot infer* from the brief, and
+   nothing else. Do not ask what the brief already answers. "Tea Top sells tea" — so never
+   ask "what do you sell". A question the user already answered reads as not listening.
+
+2. **Zero questions is a valid answer, and the stage advances straight through.** A rich brief
+   is never interrupted. This is the same pattern `ProvisioningWix` already uses for manual
+   tasks (no tasks → no pause), so it is consistent rather than a special case.
+
+3. **Multiple choice by default, free text by exception.** Our user is a business person, not
+   an author. Buttons and chips, phrased in Wix vocabulary they already own:
+
+   > *Do you want to sell tea online?*  ( Yes ) ( Not yet ) ( I already sell elsewhere )
+   > *Will you run workshops or tastings people book?*  ( Yes ) ( No )
+
+   Each answer maps onto a Wix business solution — Stores, Bookings, Blog, CRM. That mapping
+   is the whole point: it is how a plain-language answer becomes a concrete site capability.
+
+4. **Cap it at ~5, and make every one earn its place.** A twenty-question interrogation is a
+   worse experience than a wrong guess we can correct at the review gate.
+
+**Determinism implication — this one is load-bearing.** The answers become a **durable input
+artifact**, and `GeneratingSpecification` must resolve them explicitly, exactly like the brief.
+They are then folded into `inputsHash`. Get this wrong and the answers become hidden
+conversational context, which is precisely the thing the whole architecture forbids: rerun the
+stage tomorrow and it must behave the same, which means the answers have to be *inputs*, not
+memory.
+
+**This supersedes part of Phase 2's guided intake wizard.** A static wizard asks every user the
+same questions; this asks questions derived from *their actual brief*, which is strictly better.
+So intake shrinks back to "name + describe it", and this stage does the real work. **Do not
+build both.**
+
+**Deferred:** follow-up rounds (answers prompting further questions). One round in V1. If the
+answers are still thin, the specification review gate is the existing safety net — the user
+rejects the plan and it regenerates. We already have that channel; use it before inventing another.
+
+---
+
 ## Designing for a non-programmer
 
 This is a product constraint with real architectural consequences.
@@ -180,6 +241,8 @@ Internal enums stay (engineering clarity); a presentation layer maps them:
 
 | Internal stage | User sees |
 |---|---|
+| `GeneratingQuestions` | Reading your brief |
+| `WaitingForAnswers` | A few quick questions |
 | `GeneratingSpecification` | Planning your site |
 | `WaitingForSpecificationApproval` | Review your site plan |
 | `GeneratingDesign` | Designing your site |
@@ -206,6 +269,8 @@ A short wizard — what's your business, what do you need customers to do (buy /
 
 ```
 Draft
+  → GeneratingQuestions                    (what can't we infer from the brief?)
+  → WaitingForAnswers                  ⏸  "A few quick questions"  — skipped if none
   → GeneratingSpecification
   → WaitingForSpecificationApproval    ⏸  "Review your site plan"
   → GeneratingDesign
@@ -238,8 +303,12 @@ projects        id, title, owner, status, currentStage, brief,
                 attempts, lastError, createdAt, updatedAt
 
 artifacts       projectId, type, version, data, storageId?, promptHash, inputsHash, createdAt
-                type: brief | specification | design | buildReport | preview | releaseReport
+                type: brief | questions | answers | specification | design
+                    | buildReport | preview | releaseReport
                 // append-only, versioned, NEVER overwritten
+                // `answers` is a DURABLE INPUT: GeneratingSpecification resolves it
+                // explicitly and folds it into inputsHash. Answers must never become
+                // hidden conversational context — that would break determinism.
 
 reviews         projectId, artifactId, artifactType, version,
                 status: waiting | approved | rejected | needs_changes,
@@ -316,11 +385,25 @@ Prove crash-safety and resumability now, while the stages are fake and debugging
 
 ### Phase 2 — Dashboard (the non-programmer surface)
 
-Guided intake wizard. Project page: friendly stage timeline, plain-language activity feed (raw logs behind "Technical details"), version history, review panels, deep-linked manual-task checklist, preview embed.
+*Partially built during Phase 1: plain-language stage label, activity feed, review panel, manual-task checklist, change-request box, "Technical details" disclosure.*
 
-### Phase 3 — Specification (real)
+Still missing: **stage timeline** (you only see the current stage, not where you are in the journey), **version history** browsing (`design v1` vs `v2` is invisible today), **preview embed**, and the **specification rendered as a friendly summary** instead of raw JSON.
 
-`OpenAISpecGenerator`: brief → schema-constrained specification JSON. Rendered as a **friendly summary in Wix vocabulary**, editable via forms → a new versioned artifact per edit.
+Intake is **not** a wizard — it stays "name + describe it", because `GeneratingQuestions` (Phase 3) does the real elicitation, and does it better by tailoring the questions to the actual brief.
+
+**Sequencing note:** most of what remains here renders *real artifacts*. Building it against `{"fake": true}` data would mean building the wrong UI and then rebuilding it — so this lands after Phase 3.
+
+### Phase 3 — Clarifying questions + Specification (real)
+
+Two stages, one integration. The questions stage is what makes the specification worth anything — without it we are planning a website from a single sentence.
+
+- **`GeneratingQuestions`** (`QuestionGenerator`): read the brief, emit **only** what cannot be inferred from it — max ~5, multiple-choice by default, phrased in Wix vocabulary (Stores / Bookings / Blog / CRM). **Emitting zero questions is valid and skips the gate entirely**, so a rich brief is never interrupted.
+- **`WaitingForAnswers`**: the user answers with buttons, not essays. Answers are stored as a durable `answers` artifact.
+- **`GeneratingSpecification`** (`OpenAISpecGenerator`): resolves **brief + answers** explicitly, both folded into `inputsHash`. Produces a schema-constrained specification. Rendered as a **friendly summary in Wix vocabulary**, editable via forms → a new versioned artifact per edit.
+
+Both stages sit behind the `SpecGenerator` / `QuestionGenerator` interfaces, so the model behind them is swappable without touching anything else.
+
+*This subsumes Phase 2's guided intake wizard — build one, not both.*
 
 ### Phase 4 — Design (real)
 
@@ -359,15 +442,16 @@ A user can:
 
 1. Create a project.
 2. Enter a website brief.
-3. Generate a structured specification.
-4. Review and edit it.
-5. Generate a UI design.
-6. Review it.
-7. Generate a Wix Headless application.
-8. Review the generated preview.
-9. Complete any required manual Wix tasks.
-10. Publish the finished website.
-11. Ask for changes in plain English, and have them applied.
+3. Answer a few clarifying questions the system asks about that brief.
+4. Generate a structured specification.
+5. Review and edit it.
+6. Generate a UI design.
+7. Review it.
+8. Generate a Wix Headless application.
+9. Review the generated preview.
+10. Complete any required manual Wix tasks.
+11. Publish the finished website.
+12. Ask for changes in plain English, and have them applied.
 
 ---
 

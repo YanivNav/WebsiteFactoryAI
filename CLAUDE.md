@@ -62,6 +62,16 @@ programming. This is a hard constraint on everything user-facing.
   snag, retrying" — never a stack trace. This is core, not polish.
 - **Manual tasks deep-link into the Wix dashboard** they already know. Never "run
   this command".
+
+- **NEVER fabricate a user-facing URL.** If you do not *know* the link is real, ship
+  no link. This rule exists because it was already broken once: a plausible-looking
+  `manage.wix.com/premium-purchase-plan` was invented and 404'd. For a user who cannot
+  read code, a confident link to a dead page is unrecoverable — it is the exact failure
+  this product exists to prevent, and it is worse than an absent link.
+  Wix dashboard pages are **site-scoped** (`manage.wix.com/dashboard/{metaSiteId}/…`),
+  so these URLs must be *derived* from the site ID that provisioning returns — they
+  cannot be hardcoded, and cannot exist before Phase 5. Verify every path against a
+  live site before shipping it. The same goes for any other outward-facing URL.
 - **No jargon in the UI.** Never "artifact", "repository", "commit", "build", or
   "stage". `STAGE_LABELS` in `@factory/shared` is the only place internal names
   become human words.
@@ -148,8 +158,25 @@ pnpm typecheck
 
 ## Current state
 
-**Phase 0 complete: scaffolding only.** Every stage handler, Convex function, and
-service is an empty stub. Nothing is wired up. Phase 1 is the walking skeleton —
-fake stage handlers, real state machine — and its bar is: *kill the worker mid-stage,
-restart it, and the project resumes correctly.* Prove that before writing a single
-real integration.
+**Phase 1 complete: the walking skeleton runs.** The state machine, the atomic lease,
+approval gates, manual tasks, append-only artifact versioning, the change-request
+queue, and the dashboard are all real and verified end-to-end.
+
+**The stage handlers are FAKE** (`packages/worker/src/stages/*`). They log, pause, and
+emit canned artifacts. `FAKE_WORK_MS` widens the pause so you can kill the worker
+mid-stage. Phases 3–5 replace them one at a time; nothing else should need to move.
+
+Verified, not assumed:
+- A worker `kill -9`'d mid-stage leaves a stale lease; a fresh worker reclaims it after
+  the TTL and **redoes the stage from scratch** — safe precisely because stages are
+  deterministic from their inputs.
+- The worker refuses to touch `Waiting*` stages. Approving flips the stage; the worker
+  picks it up. No pause/resume code exists.
+- A rejected/changed artifact produces `v2`. `v1` is never mutated.
+- `Completed` → change request → `GeneratingCode` → … → `Completed`. It is a resting
+  state, not a terminal one.
+
+**Lease TTL is the crash-recovery latency.** Default 300s: a crashed worker's project
+is stuck for up to 5 minutes. That is safe (a slow-but-alive worker is never robbed
+mid-stage) but slow. When code generation gets long in Phase 5, the renew interval —
+not the TTL — is what keeps a healthy worker's lease alive.
