@@ -1,14 +1,31 @@
 /**
  * Specification → design.
  *
- * Input:  the approved specification.
- * Output: a design artifact — HTML + a screenshot per screen, straight from Stitch.
- *
- * That output shape is a gift: it is directly consumable by code generation, and it
- * is something a non-technical user can actually review (a gallery of screens).
- *
- * PHASE 4. Not implemented.
+ * PHASE 1: fake.
+ * PHASE 4: services/stitch. Real output is HTML + a screenshot per screen — reviewable
+ *          by a human, and directly consumable by code generation.
  */
 
-// TODO(phase-4): implement via services/stitch (DesignGenerator).
-export {};
+import type { StageHandler } from "./types.js";
+import { fakeWork } from "./fake.js";
+
+export const generateDesign: StageHandler = {
+  stage: "GeneratingDesign",
+
+  async run(ctx) {
+    await ctx.log("Designing your site");
+    await fakeWork();
+
+    // TODO(phase-4): StitchDesignGenerator.generate(approvedSpecification)
+    await ctx.emitArtifact("design", {
+      fake: true,
+      screens: [
+        { name: "Home", html: null, screenshot: null },
+        { name: "About", html: null, screenshot: null },
+      ],
+    });
+
+    await ctx.log("Design ready for review");
+    return { kind: "advance" };
+  },
+};

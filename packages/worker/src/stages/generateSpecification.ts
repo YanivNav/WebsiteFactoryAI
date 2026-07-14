@@ -1,15 +1,29 @@
 /**
  * Brief → structured specification.
  *
- * Input:  the brief.
- * Output: a schema-constrained specification artifact (versioned).
- *
- * The user never sees this as JSON. The dashboard renders it as a friendly summary
- * in Wix vocabulary — pages, sections, and features they already understand
- * (Store, Bookings, Blog, CRM, CMS).
- *
- * PHASE 3. Not implemented.
+ * PHASE 1: fake. Emits a canned specification so the review gate downstream is real.
+ * PHASE 3: replace the body with services/openai (SpecGenerator). Nothing else changes.
  */
 
-// TODO(phase-3): implement via services/openai (SpecGenerator).
-export {};
+import type { StageHandler } from "./types.js";
+import { fakeWork } from "./fake.js";
+
+export const generateSpecification: StageHandler = {
+  stage: "GeneratingSpecification",
+
+  async run(ctx) {
+    await ctx.log("Planning your site");
+    await fakeWork();
+
+    // TODO(phase-3): OpenAISpecGenerator.generate(ctx.brief)
+    await ctx.emitArtifact("specification", {
+      fake: true,
+      pages: ["Home", "About", "Contact"],
+      wixFeatures: ["CMS"],
+      fromBrief: ctx.brief.slice(0, 80),
+    });
+
+    await ctx.log("Site plan ready for review");
+    return { kind: "advance" };
+  },
+};
