@@ -10,7 +10,7 @@ import { LifecycleRail, ProjectHeader, ReturnToPhaseDialog } from "@/components/
 import { WorkingWorkspace } from "@/components/WorkingWorkspace";
 import { ReviewWorkspace } from "@/components/ReviewWorkspace";
 import { LiveWorkspace, ManualActions, QuickQuestions } from "@/components/StageViews";
-import type { ReturnPhase } from "./helpers/projectPhases";
+import type { ReturnPhase } from "@/helpers/projectPhases";
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

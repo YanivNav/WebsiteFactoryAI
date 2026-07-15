@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { isWaitingStage, STAGES, STAGE_LABELS, type Stage } from "@factory/shared";
-import { PROJECT_PHASES, type ReturnPhase } from "../app/projects/[id]/helpers/projectPhases";
+import { PROJECT_PHASES, type ReturnPhase } from "@/helpers/projectPhases";
 
 export function ProjectHeader({ projectTitle, stage }: { projectTitle: string; stage: Stage }) {
   return (
