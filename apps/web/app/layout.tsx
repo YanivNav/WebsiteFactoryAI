@@ -4,7 +4,7 @@ import { Providers } from "./providers";
 import { Navbar } from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "Wix Fleet Manager",
+  title: "Wix Website Factory",
   description: "Automation control for Wix website projects.",
 };
 
