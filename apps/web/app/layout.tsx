@@ -1,36 +1,22 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type {Metadata} from "next";
 import "./globals.css";
-import { Providers } from "./providers";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import {Providers} from "./providers";
+import {Navbar} from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "AI Website Factory",
-  description: "Describe your website. We build it.",
+  title: "Wix Fleet Manager",
+  description: "Automation control for Wix website projects.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({children}: Readonly<{children: React.ReactNode}>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full bg-neutral-50 text-neutral-900">
+    <html lang="en">
+      <body>
         <Providers>
-          <div className="mx-auto max-w-3xl px-6 py-10">{children}</div>
+          <div className="flex min-h-screen">
+            <aside className="fixed inset-y-0 left-0 z-20 w-[72px] border-r border-outline bg-canvas md:w-60"><Navbar/></aside>
+            <div className="ml-[72px] w-[calc(100%-72px)] md:ml-60 md:w-[calc(100%-240px)]">{children}</div>
+          </div>
         </Providers>
       </body>
     </html>

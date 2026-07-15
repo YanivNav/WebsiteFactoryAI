@@ -1,14 +1,34 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: #0058be;
+  --color-canvas: #f7f8fa;
+  --color-ink: #191c1d;
+  --color-ink-muted: #596170;
+  --color-outline: #c7ccda;
+  --font-sans: Inter, Arial, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
-/* The dashboard commits to a single light look for now — the scaffold's
-   prefers-color-scheme block was flipping the page background to near-black while
-   the cards stayed white, which made the text unreadable in dark mode. A proper
-   dark theme can come later; a half-applied one is worse than none. */
-body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+@layer base {
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body { margin: 0; background: var(--color-canvas); color: var(--color-ink); }
+  button, a { -webkit-tap-highlight-color: transparent; }
+
+  input[type="search"]::-webkit-search-decoration,
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-results-button,
+  input[type="search"]::-webkit-search-results-decoration {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
