@@ -1,26 +1,53 @@
 /**
  * Brief → structured specification.
  *
- * PHASE 1: fake. Emits a canned specification so the review gate downstream is real.
- * PHASE 3: replace the body with services/openai (SpecGenerator). Nothing else changes.
+ * PHASE 3. This stage is REAL — it is the first one that is. The fake is gone.
+ *
+ * The user never sees this as JSON. The dashboard renders it as a friendly summary in
+ * Wix vocabulary — pages, sections, and features they already understand (Store,
+ * Bookings, Blog, CRM). That rendering is Phase 2 work; the data is right regardless.
  */
 
+import { hashInputs } from "../lib/hash.js";
+import {
+  LlmSpecGenerator,
+  type SpecGenerator,
+  type SpecInput,
+} from "../services/spec/index.js";
 import type { StageHandler } from "./types.js";
-import { fakeWork } from "./fake.js";
+
+// Lazy, so a missing API key only breaks the stage that needs it — not the whole
+// worker on boot, which would take the other six stages down with it.
+let generator: SpecGenerator | undefined;
+function specGenerator(): SpecGenerator {
+  generator ??= new LlmSpecGenerator();
+  return generator;
+}
 
 export const generateSpecification: StageHandler = {
   stage: "GeneratingSpecification",
 
   async run(ctx) {
     await ctx.log("Planning your site");
-    await fakeWork();
 
-    // TODO(phase-3): OpenAISpecGenerator.generate(ctx.brief)
-    await ctx.emitArtifact("specification", {
-      fake: true,
-      pages: ["Home", "About", "Contact"],
-      wixFeatures: ["CMS"],
-      fromBrief: ctx.brief.slice(0, 80),
+    // Resolve the inputs EXPLICITLY, in one place, before doing anything.
+    //
+    // This object is the stage's whole world. Everything the specification depends on
+    // appears here and nowhere else — which is what makes the stage rerunnable, and
+    // what makes `inputsHash` mean something. Reaching around this for "just one more
+    // bit of context" is exactly how determinism dies.
+    const inputs: SpecInput = {
+      brief: ctx.brief,
+    };
+
+    const { specification, promptHash } = await specGenerator().generate(inputs);
+
+    // Append-only: this always creates a new version, never mutates an old one.
+    // Emitting a `specification` also opens the review gate for it, which is what
+    // parks the project at WaitingForSpecificationApproval on the next transition.
+    await ctx.emitArtifact("specification", specification, {
+      promptHash,
+      inputsHash: hashInputs(inputs),
     });
 
     await ctx.log("Site plan ready for review");

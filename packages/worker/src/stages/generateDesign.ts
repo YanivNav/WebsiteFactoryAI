@@ -7,7 +7,7 @@
  */
 
 import type { StageHandler } from "./types.js";
-import { fakeWork } from "./fake.js";
+import { fakeWork, FAKE_PROVENANCE } from "./fake.js";
 
 export const generateDesign: StageHandler = {
   stage: "GeneratingDesign",
@@ -17,13 +17,17 @@ export const generateDesign: StageHandler = {
     await fakeWork();
 
     // TODO(phase-4): StitchDesignGenerator.generate(approvedSpecification)
-    await ctx.emitArtifact("design", {
-      fake: true,
-      screens: [
-        { name: "Home", html: null, screenshot: null },
-        { name: "About", html: null, screenshot: null },
-      ],
-    });
+    await ctx.emitArtifact(
+      "design",
+      {
+        fake: true,
+        screens: [
+          { name: "Home", html: null, screenshot: null },
+          { name: "About", html: null, screenshot: null },
+        ],
+      },
+      FAKE_PROVENANCE,
+    );
 
     await ctx.log("Design ready for review");
     return { kind: "advance" };

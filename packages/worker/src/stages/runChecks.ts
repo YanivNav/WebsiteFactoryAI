@@ -16,7 +16,7 @@
  */
 
 import type { StageHandler } from "./types.js";
-import { fakeWork } from "./fake.js";
+import { fakeWork, FAKE_PROVENANCE } from "./fake.js";
 
 export const runChecks: StageHandler = {
   stage: "RunningChecks",
@@ -27,7 +27,11 @@ export const runChecks: StageHandler = {
 
     // TODO(phase-5): const result = await wix.build()
     //                if (!result.ok) → services/claude repair loop, N attempts
-    await ctx.emitArtifact("buildReport", { fake: true, ok: true, errors: [] });
+    await ctx.emitArtifact(
+      "buildReport",
+      { fake: true, ok: true, errors: [] },
+      FAKE_PROVENANCE,
+    );
 
     return { kind: "advance" };
   },

@@ -12,7 +12,7 @@
  */
 
 import type { StageHandler } from "./types.js";
-import { fakeWork } from "./fake.js";
+import { fakeWork, FAKE_PROVENANCE } from "./fake.js";
 
 export const publish: StageHandler = {
   stage: "Publishing",
@@ -22,10 +22,11 @@ export const publish: StageHandler = {
     await fakeWork();
 
     // TODO(phase-5): WixManagedPublisher.release() → live URL
-    await ctx.emitArtifact("releaseReport", {
-      fake: true,
-      liveUrl: "https://example.com/fake-live",
-    });
+    await ctx.emitArtifact(
+      "releaseReport",
+      { fake: true, liveUrl: "https://example.com/fake-live" },
+      FAKE_PROVENANCE,
+    );
 
     await ctx.log("Your site is live");
     return { kind: "advance" };

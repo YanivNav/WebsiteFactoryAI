@@ -70,15 +70,15 @@ export class LocalRunner implements JobRunner {
             message,
             data,
           }),
-        emitArtifact: async (type, data) => {
+        emitArtifact: async (type, data, provenance) => {
           await this.store.appendArtifact({
             projectId: project.id,
             type,
             data,
-            // TODO(phase-3+): real hashes. These are what make "deterministic from
-            // its inputs" enforceable rather than aspirational.
-            promptHash: "fake",
-            inputsHash: "fake",
+            // Provenance comes from the stage, because only the stage knows which
+            // prompt it used and which inputs it resolved. The runner just records it.
+            promptHash: provenance.promptHash,
+            inputsHash: provenance.inputsHash,
           });
         },
       };

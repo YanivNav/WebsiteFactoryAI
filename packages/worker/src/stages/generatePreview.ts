@@ -10,7 +10,7 @@
  */
 
 import type { StageHandler } from "./types.js";
-import { fakeWork } from "./fake.js";
+import { fakeWork, FAKE_PROVENANCE } from "./fake.js";
 
 export const generatePreview: StageHandler = {
   stage: "GeneratingPreview",
@@ -20,10 +20,11 @@ export const generatePreview: StageHandler = {
     await fakeWork();
 
     // TODO(phase-5): WixService.preview() → shareable URL
-    await ctx.emitArtifact("preview", {
-      fake: true,
-      url: "https://example.com/fake-preview",
-    });
+    await ctx.emitArtifact(
+      "preview",
+      { fake: true, url: "https://example.com/fake-preview" },
+      FAKE_PROVENANCE,
+    );
 
     await ctx.log("Preview ready for review");
     return { kind: "advance" };

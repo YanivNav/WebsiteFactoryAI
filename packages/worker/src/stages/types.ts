@@ -35,7 +35,26 @@ export interface StageContext {
   log(message: string, data?: Record<string, unknown>): Promise<void>;
 
   /** Append-only. Emitting a `specification` also opens the review gate for it. */
-  emitArtifact(type: ArtifactTypeName, data: unknown): Promise<void>;
+  emitArtifact(
+    type: ArtifactTypeName,
+    data: unknown,
+    provenance: Provenance,
+  ): Promise<void>;
+}
+
+/**
+ * Where an artifact came from. Required, not optional — that is deliberate.
+ *
+ * If provenance were optional it would quietly default to nothing, and the
+ * determinism guarantee would erode one convenient omission at a time. Making it
+ * mandatory forces a stage that has no real provenance to say so out loud (see
+ * `FAKE_PROVENANCE`), which keeps the fakes visibly fake.
+ */
+export interface Provenance {
+  /** sha256 of the prompt file used. Empty only for stages that use no prompt. */
+  promptHash: string;
+  /** sha256 of the exact inputs the stage resolved. */
+  inputsHash: string;
 }
 
 export type ArtifactTypeName =
