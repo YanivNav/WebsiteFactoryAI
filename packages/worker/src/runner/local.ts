@@ -30,14 +30,27 @@ export class LocalRunner implements JobRunner {
     const project = await this.store.leaseNextRunnable(this.workerId, this.leaseTtlSeconds);
     if (!project) return false;
 
+    const prefix = `[worker ${this.workerId}] [project ${project.id}] [${project.currentStage}]`;
+    const attempt = project.attempts + 1;
+    console.log(`${prefix} leased — attempt ${attempt}`);
+    await this.store.appendLog({
+      projectId: project.id,
+      stage: project.currentStage,
+      level: "info",
+      message: attempt > 1 ? `Retry attempt ${attempt} started` : "Work started",
+      data: { kind: "attempt-started", attempt },
+    });
+
     const handler = HANDLERS[project.currentStage];
 
     if (!handler) {
       // A runnable stage with no handler is a programming error, not a runtime one.
       // Fail loudly rather than silently parking the project forever.
+      const error = `No handler registered for stage ${project.currentStage}`;
+      console.error(`${prefix} failed — ${error}`);
       await this.store.commitResult(project.id, this.workerId, {
         kind: "failed",
-        error: `No handler registered for stage ${project.currentStage}`,
+        error,
       });
       return true;
     }
@@ -46,7 +59,10 @@ export class LocalRunner implements JobRunner {
     // out from under itself.
     const renew = setInterval(
       () => {
-        void this.store.renewLease(project.id, this.workerId).catch(() => {});
+        void this.store
+          .renewLease(project.id, this.workerId)
+          .then(() => console.log(`${prefix} lease renewed`))
+          .catch((error) => console.error(`${prefix} lease renewal failed`, error));
       },
       (this.leaseTtlSeconds * 1000) / 3,
     );
@@ -59,15 +75,18 @@ export class LocalRunner implements JobRunner {
         mode: project.settings.mode,
         attempts: project.attempts,
         store: this.store,
-        log: (message, data) =>
-          this.store.appendLog({
+        log: async (message, data) => {
+          console.log(`${prefix} ${message}`);
+          await this.store.appendLog({
             projectId: project.id,
             stage: project.currentStage,
             level: "info",
             message,
             data,
-          }),
+          });
+        },
         emitArtifact: async (type, data, provenance) => {
+          console.log(`${prefix} storing ${type}`);
           await this.store.appendArtifact({
             projectId: project.id,
             type,
@@ -77,6 +96,7 @@ export class LocalRunner implements JobRunner {
             promptHash: provenance.promptHash,
             inputsHash: provenance.inputsHash,
           });
+          console.log(`${prefix} stored ${type}`);
         },
       };
 
@@ -86,35 +106,58 @@ export class LocalRunner implements JobRunner {
         // The handler does not decide what comes next — the machine does, from the
         // pure shared transition table. Handlers stay independent and ignorant of
         // each other, which is what lets any of them be rerun in isolation.
+        const next = nextStage(project.currentStage, project.settings.mode);
         await this.store.commitResult(project.id, this.workerId, {
           kind: "advance",
-          next: nextStage(project.currentStage, project.settings.mode),
+          next,
         });
+        console.log(`${prefix} completed → ${next}`);
+      } else if (result.kind === "route") {
+        await this.store.commitResult(project.id, this.workerId, {
+          kind: "advance",
+          next: result.next,
+        });
+        console.log(`${prefix} routed → ${result.next}`);
       } else if (result.kind === "questions") {
+        const next = result.hasQuestions ? "WaitingForAnswers" : "GeneratingSpecification";
         await this.store.commitResult(project.id, this.workerId, {
           kind: "advance",
-          next: result.hasQuestions ? "WaitingForAnswers" : "GeneratingSpecification",
+          next,
         });
+        console.log(`${prefix} completed → ${next}`);
       } else if (result.kind === "manualTasks") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "manualTasks",
           tasks: result.tasks,
         });
+        console.log(`${prefix} completed → WaitingForManualActions (${result.tasks.length} tasks)`);
       } else {
+        console.error(`${prefix} failed — ${result.error}`);
         await this.store.commitResult(project.id, this.workerId, {
           kind: "failed",
           error: result.error,
         });
+        console.log(`${prefix} failure recorded; stage is ready to retry`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error(`${prefix} attempt ${attempt} threw — ${message}`);
 
       // A thrown handler is just a failure. The lease is released, the stage stays
       // put, and it becomes leasable again — because the stage is deterministic from
       // its inputs, redoing it is always safe.
-      await this.store
-        .commitResult(project.id, this.workerId, { kind: "failed", error: message })
-        .catch(() => {});
+      try {
+        await this.store.commitResult(project.id, this.workerId, {
+          kind: "failed",
+          error: message,
+        });
+        console.log(`${prefix} failure recorded; stage is ready to retry`);
+      } catch (commitError) {
+        console.error(
+          `${prefix} could not record failure; lease must expire before retry`,
+          commitError,
+        );
+      }
     } finally {
       clearInterval(renew);
     }

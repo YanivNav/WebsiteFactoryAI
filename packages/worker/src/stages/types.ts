@@ -66,6 +66,8 @@ export type ArtifactTypeName =
 export type StageResult =
   /** Work done. The machine resolves the actual next stage via `nextStage()`. */
   | { kind: "advance" }
+  /** Feedback analysis may deliberately return to an earlier work stage. */
+  | { kind: "route"; next: Stage }
   /** Empty question sets skip the human gate; non-empty sets wait for answers. */
   | { kind: "questions"; hasQuestions: boolean }
   /** Blocked on a human. Raises tasks and parks the project in WaitingForManualActions. */

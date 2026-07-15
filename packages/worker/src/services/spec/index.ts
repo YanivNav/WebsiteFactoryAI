@@ -28,6 +28,8 @@ import { resolveModel } from "../llm/index.js";
 export interface SpecInput {
   brief: string;
   answers: AnswerSet["answers"];
+  designFeedback: string[];
+  previousSpecification?: Specification;
 }
 
 export interface SpecResult {
@@ -62,6 +64,12 @@ export class LlmSpecGenerator implements SpecGenerator {
         input.answers.length > 0
           ? `Clarifying answers:\n${input.answers.map((answer) => `- ${answer.questionId}: ${answer.value}`).join("\n")}`
           : "Clarifying answers: none required.",
+        input.previousSpecification
+          ? `Current approved site plan:\n${JSON.stringify(input.previousSpecification, null, 2)}`
+          : "Current approved site plan: none.",
+        input.designFeedback.length > 0
+          ? `Feedback from visual design review:\n${input.designFeedback.map((item) => `- ${item}`).join("\n")}\nUpdate the site structure only where the feedback requires it. Add or remove pages and sections when necessary; preserve unrelated decisions.`
+          : "Feedback from visual design review: none.",
       ].join("\n\n"),
     });
 

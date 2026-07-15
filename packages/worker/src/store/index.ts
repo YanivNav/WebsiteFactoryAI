@@ -85,6 +85,11 @@ export interface ProjectStore {
   }): Promise<ArtifactRecord>;
   getLatestApproved(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
   getLatestArtifact(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
+  getLatestReviewComments(projectId: ProjectId, type: ArtifactType): Promise<string[]>;
+  getLatestReviewContext(
+    projectId: ProjectId,
+    type: ArtifactType,
+  ): Promise<{ comments: string[]; artifact: ArtifactRecord } | null>;
 
   // ── blobs ──────────────────────────────────────────────────────────────────
   /** Never inline a blob into a document. Store it, keep the id. */

@@ -6,8 +6,9 @@
  */
 
 import { v } from "convex/values";
-import { nextStage } from "@factory/shared";
+import { isRunnableStage, nextStage } from "@factory/shared";
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 
 const SINGLE_USER = "owner";
 
@@ -102,6 +103,133 @@ export const submitAnswers = mutation({
   },
 });
 
+const returnPhaseValidator = v.union(
+  v.literal("sitePlan"),
+  v.literal("visualDesign"),
+  v.literal("wixSetup"),
+  v.literal("siteBuild"),
+  v.literal("finalReview"),
+  v.literal("publishing"),
+);
+
+/**
+ * Return to an earlier lifecycle phase without deleting derived work. Review phases
+ * reopen the latest saved version; work phases restart at their entry stage. Any
+ * in-flight lease is revoked so a late worker result cannot advance the project.
+ */
+export const returnToPhase = mutation({
+  args: { projectId: v.id("projects"), phase: returnPhaseValidator },
+  handler: async (ctx, { projectId, phase }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("Project not found");
+
+    const targets = {
+      sitePlan: {
+        label: "site plan",
+        stage: "WaitingForSpecificationApproval" as const,
+        artifactType: "specification" as const,
+      },
+      visualDesign: {
+        label: "visual design",
+        stage: "WaitingForDesignApproval" as const,
+        artifactType: "design" as const,
+      },
+      wixSetup: { label: "Wix setup", stage: "ProvisioningWix" as const },
+      siteBuild: { label: "site build", stage: "GeneratingCode" as const },
+      finalReview: {
+        label: "final review",
+        stage: "WaitingForFinalApproval" as const,
+        artifactType: "preview" as const,
+      },
+      publishing: { label: "publishing", stage: "Publishing" as const },
+    };
+    const target = targets[phase];
+
+    const waitingReviews = (
+      await ctx.db
+        .query("reviews")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect()
+    ).filter((review) => review.status === "waiting");
+    for (const review of waitingReviews) {
+      await ctx.db.patch(review._id, {
+        status: "rejected",
+        comments: [...review.comments, `Closed after returning to ${target.label}`],
+      });
+    }
+
+    if ("artifactType" in target) {
+      const artifacts = await ctx.db
+        .query("artifacts")
+        .withIndex("by_project_type", (q) =>
+          q.eq("projectId", projectId).eq("type", target.artifactType),
+        )
+        .collect();
+      const artifact = artifacts.sort((a, b) => b.version - a.version)[0];
+      if (!artifact) throw new Error(`No saved ${target.label} is available`);
+      await ctx.db.insert("reviews", {
+        projectId,
+        artifactId: artifact._id,
+        artifactType: target.artifactType,
+        version: artifact.version,
+        status: "waiting",
+        comments: [],
+      });
+    }
+
+    const runningStageRuns = (
+      await ctx.db
+        .query("stageRuns")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect()
+    ).filter((run) => run.status === "running");
+    for (const run of runningStageRuns) {
+      await ctx.db.patch(run._id, {
+        status: "failed",
+        finishedAt: Date.now(),
+        error: `Stopped after returning to ${target.label}`,
+      });
+    }
+
+    await ctx.db.insert("logs", {
+      projectId,
+      stage: project.currentStage,
+      level: "info",
+      message: `Returned to ${target.label}`,
+    });
+    await ctx.db.patch(projectId, {
+      currentStage: target.stage,
+      status: "active",
+      attempts: 0,
+      lastError: undefined,
+      leaseWorkerId: undefined,
+      leaseExpiresAt: undefined,
+    });
+  },
+});
+
+export const retryCurrentStage = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("Project not found");
+    if (!isRunnableStage(project.currentStage) || project.attempts < 3) return;
+    await ctx.db.insert("logs", {
+      projectId,
+      stage: project.currentStage,
+      level: "info",
+      message: "Retry requested",
+    });
+    await ctx.db.patch(projectId, {
+      attempts: 0,
+      lastError: undefined,
+      leaseWorkerId: undefined,
+      leaseExpiresAt: undefined,
+      status: "active",
+    });
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) =>
@@ -153,6 +281,33 @@ export const detail = query({
         .collect(),
     ]);
 
+    const artifactStorageIds = artifacts.flatMap((artifact) => {
+      if (artifact.type !== "design") return [];
+      const screens =
+        (
+          artifact.data as {
+            screens?: Array<{ htmlStorageId?: string; screenshotStorageId?: string }>;
+          }
+        ).screens ?? [];
+      return screens.flatMap(
+        (screen) => [screen.htmlStorageId, screen.screenshotStorageId].filter(Boolean) as string[],
+      );
+    });
+    const progressStorageIds = logs.flatMap((log) => {
+      const storageId = (log.data as { screenshotStorageId?: string } | undefined)
+        ?.screenshotStorageId;
+      return storageId ? [storageId] : [];
+    });
+    const storageIds = [...new Set([...artifactStorageIds, ...progressStorageIds])];
+    const assetUrls = Object.fromEntries(
+      await Promise.all(
+        storageIds.map(async (storageId) => [
+          storageId,
+          await ctx.storage.getUrl(storageId as Id<"_storage">),
+        ]),
+      ),
+    );
+
     return {
       project,
       artifacts,
@@ -160,6 +315,7 @@ export const detail = query({
       manualTasks,
       logs,
       changeRequests,
+      assetUrls,
       // The gate the user is currently sitting at, if any.
       pendingReview: reviews.find((r) => r.status === "waiting") ?? null,
     };

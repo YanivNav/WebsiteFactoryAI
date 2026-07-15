@@ -62,9 +62,37 @@ export const requestChanges = mutation({
 
     await ctx.db.patch(reviewId, { status: "needs_changes", comments });
 
+    const isTargetedScreenChange = comments.every((comment) => {
+      try {
+        const parsed = JSON.parse(comment) as { kind?: string };
+        return parsed.kind === "screen-feedback";
+      } catch {
+        return false;
+      }
+    });
+    if (review.artifactType === "design" && isTargetedScreenChange) {
+      const artifact = await ctx.db.get(review.artifactId);
+      const screenIds = new Set(
+        (
+          (artifact?.data as { screens?: Array<{ stitchScreenId?: string }> } | undefined)
+            ?.screens ?? []
+        )
+          .map((screen) => screen.stitchScreenId)
+          .filter(Boolean),
+      );
+      const targetsCurrentVersion = comments.every((comment) => {
+        const screenId = (JSON.parse(comment) as { screenId?: string }).screenId;
+        return Boolean(screenId && screenIds.has(screenId));
+      });
+      if (!targetsCurrentVersion) {
+        throw new Error(
+          "Older design versions are read-only. Reopen the latest version to revise it.",
+        );
+      }
+    }
     const REGENERATE_AT = {
       specification: "GeneratingSpecification",
-      design: "GeneratingDesign",
+      design: isTargetedScreenChange ? "GeneratingDesign" : "GeneratingSpecification",
       preview: "GeneratingCode",
     } as const;
 

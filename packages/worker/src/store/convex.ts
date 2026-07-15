@@ -41,6 +41,10 @@ const FN = {
   appendArtifact: mut("worker:appendArtifact"),
   appendLog: mut("worker:appendLog"),
   getLatestArtifact: mut("worker:getLatestArtifact"),
+  getLatestApproved: mut("worker:getLatestApproved"),
+  generateUploadUrl: mut("worker:generateUploadUrl"),
+  getLatestReviewComments: mut("worker:getLatestReviewComments"),
+  getLatestReviewContext: mut("worker:getLatestReviewContext"),
   hasBlockingIncompleteTasks: mut("worker:hasBlockingIncompleteTasks"),
   claimChangeRequest: mut("worker:claimChangeRequest"),
   completeChangeRequest: mut("worker:completeChangeRequest"),
@@ -93,9 +97,14 @@ export class ConvexProjectStore implements ProjectStore {
     return { id: res.id, type: input.type, version: res.version, data: input.data };
   }
 
-  async getLatestApproved(): Promise<ArtifactRecord | null> {
-    // TODO(phase-3): needed once stages actually consume upstream artifacts.
-    return null;
+  async getLatestApproved(
+    projectId: ProjectId,
+    type: ArtifactType,
+  ): Promise<ArtifactRecord | null> {
+    return (await this.client.mutation(FN.getLatestApproved, {
+      projectId,
+      type,
+    })) as ArtifactRecord | null;
   }
 
   async getLatestArtifact(
@@ -108,9 +117,33 @@ export class ConvexProjectStore implements ProjectStore {
     })) as ArtifactRecord | null;
   }
 
-  async putBlob(): Promise<string> {
-    // TODO(phase-4): Stitch HTML + screenshots. Blobs never go inside documents.
-    throw new Error("putBlob not implemented until Phase 4");
+  async getLatestReviewComments(projectId: ProjectId, type: ArtifactType): Promise<string[]> {
+    return (await this.client.mutation(FN.getLatestReviewComments, {
+      projectId,
+      type,
+    })) as string[];
+  }
+
+  async getLatestReviewContext(
+    projectId: ProjectId,
+    type: ArtifactType,
+  ): Promise<{ comments: string[]; artifact: ArtifactRecord } | null> {
+    return (await this.client.mutation(FN.getLatestReviewContext, {
+      projectId,
+      type,
+    })) as { comments: string[]; artifact: ArtifactRecord } | null;
+  }
+
+  async putBlob(bytes: Uint8Array, contentType: string): Promise<string> {
+    const uploadUrl = (await this.client.mutation(FN.generateUploadUrl, {})) as string;
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": contentType },
+      body: new Blob([bytes], { type: contentType }),
+    });
+    if (!response.ok) throw new Error(`Convex storage upload failed (${response.status})`);
+    const result = (await response.json()) as { storageId: string };
+    return result.storageId;
   }
 
   async appendLog(input: {

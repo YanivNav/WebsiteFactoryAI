@@ -39,7 +39,11 @@ export const leaseNextRunnable = mutation({
 
       const project = candidates.find(
         (p) =>
-          p.status === "active" && (p.leaseWorkerId === undefined || (p.leaseExpiresAt ?? 0) < now), // stale lease → reclaim
+          p.status === "active" &&
+          p.attempts < 3 &&
+          (p.leaseWorkerId === undefined ||
+            p.leaseWorkerId === workerId ||
+            (p.leaseExpiresAt ?? 0) < now), // stale lease or restarted local worker → reclaim
       );
 
       if (!project) continue;
@@ -47,6 +51,7 @@ export const leaseNextRunnable = mutation({
       await ctx.db.patch(project._id, {
         leaseWorkerId: workerId,
         leaseExpiresAt: now + ttlSeconds * 1000,
+        lastError: undefined,
       });
 
       await ctx.db.insert("stageRuns", {
@@ -260,6 +265,79 @@ export const getLatestArtifact = mutation({
     return latest
       ? { id: latest._id, type: latest.type, version: latest.version, data: latest.data }
       : null;
+  },
+});
+
+export const generateUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => await ctx.storage.generateUploadUrl(),
+});
+
+export const getLatestApproved = mutation({
+  args: {
+    projectId: v.id("projects"),
+    type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
+  },
+  handler: async (ctx, { projectId, type }) => {
+    const reviews = await ctx.db
+      .query("reviews")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    const approved = reviews
+      .filter((review) => review.artifactType === type && review.status === "approved")
+      .sort((a, b) => b.version - a.version)[0];
+    if (!approved) return null;
+    const artifact = await ctx.db.get(approved.artifactId);
+    return artifact
+      ? { id: artifact._id, type: artifact.type, version: artifact.version, data: artifact.data }
+      : null;
+  },
+});
+
+export const getLatestReviewComments = mutation({
+  args: {
+    projectId: v.id("projects"),
+    type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
+  },
+  handler: async (ctx, { projectId, type }) => {
+    const reviews = await ctx.db
+      .query("reviews")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    return (
+      reviews
+        .filter((review) => review.artifactType === type && review.status === "needs_changes")
+        .sort((a, b) => b._creationTime - a._creationTime)[0]?.comments ?? []
+    );
+  },
+});
+
+export const getLatestReviewContext = mutation({
+  args: {
+    projectId: v.id("projects"),
+    type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
+  },
+  handler: async (ctx, { projectId, type }) => {
+    const review = (
+      await ctx.db
+        .query("reviews")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect()
+    )
+      .filter((item) => item.artifactType === type && item.status === "needs_changes")
+      .sort((a, b) => b._creationTime - a._creationTime)[0];
+    if (!review) return null;
+    const artifact = await ctx.db.get(review.artifactId);
+    if (!artifact) return null;
+    return {
+      comments: review.comments,
+      artifact: {
+        id: artifact._id,
+        type: artifact.type,
+        version: artifact.version,
+        data: artifact.data,
+      },
+    };
   },
 });
 

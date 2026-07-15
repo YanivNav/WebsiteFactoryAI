@@ -60,6 +60,25 @@ export type QuestionSet = z.infer<typeof ClarifyingQuestionSet>;
 export type ClarifyingQuestion = QuestionSet["questions"][number];
 export type AnswerSet = z.infer<typeof ClarifyingAnswerSet>;
 
+export const DESIGN_VIEWPORTS = ["desktop", "mobile", "tablet"] as const;
+
+export const ProjectDesign = z.object({
+  stitchProjectId: z.string(),
+  screens: z.array(
+    z.object({
+      pageTitle: z.string(),
+      pagePath: z.string(),
+      viewport: z.enum(DESIGN_VIEWPORTS),
+      stitchScreenId: z.string(),
+      htmlStorageId: z.string(),
+      screenshotStorageId: z.string(),
+    }),
+  ),
+});
+
+export type Design = z.infer<typeof ProjectDesign>;
+export type DesignViewport = (typeof DESIGN_VIEWPORTS)[number];
+
 // TODO(phase-4): the Design shape (Stitch screens: HTML + screenshot per screen).
 
 /**

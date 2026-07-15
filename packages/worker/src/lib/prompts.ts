@@ -23,7 +23,7 @@ import { sha256 } from "./hash.js";
 // packages/worker/src/lib → packages/prompts
 const PROMPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../prompts");
 
-export type PromptName = "questions" | "spec" | "design" | "code" | "fix";
+export type PromptName = "questions" | "spec" | "design" | "screen-change" | "code" | "fix";
 
 export interface Prompt {
   readonly name: PromptName;
