@@ -16,9 +16,20 @@ pausing whenever a human is needed and resuming afterwards.
 approvals, logs, and manual tasks. The worker only *advances* it. There is no
 workflow engine and we do not need one — persisted state in Convex *is* the engine.
 
-**2. The user cannot read code.** They are Wix-literate business people: they know
-Stores, Bookings, CRM, CMS, and the Wix dashboard. They know nothing about
-programming. This is a hard constraint on everything user-facing.
+**2. The user is a Wix professional, not a software engineer.** This is an **internal
+tool**: the users are Wix website builders who build sites for clients, all day, for a
+living. Wix vocabulary — Stores, Bookings, CMS collections, the dashboard — is native to
+them and is NOT jargon. Software-engineering vocabulary is: they do not read code, and
+they never want to see a stack trace.
+
+They are **experts under time pressure, juggling several client projects at once.** So:
+be dense and fast, not spacious and hand-holding. Never patronise them. But never make
+them debug an Astro type error either — the point of this tool is throughput.
+
+*(V2 may sell this to actual business owners, who genuinely cannot read anything
+technical. `settings.mode` already encodes both audiences: `developer` is today's
+internal user, `simple` is the future product. Keep `STAGE_LABELS` and the plain-language
+layer alive for that — just don't design for it now.)*
 
 ## Rules that are load-bearing
 
@@ -53,15 +64,21 @@ programming. This is a hard constraint on everything user-facing.
 - **Claude is never told "build my website".** It gets the specification, the design,
   the repository, `CLAUDE.md`, and *one scoped task*.
 
-## Consequences of "the user cannot read code"
+## Consequences of who the user is
 
-- **Review gates are visual.** A merchant cannot approve a diff; they can judge a
-  rendered preview. `WaitingForCodeReview` only exists in `developer` mode.
-- **The AI fixes its own build failures.** `astro check: TS2304` is unactionable for
-  this user, so `RunningChecks` self-heals before escalating. A human sees "we hit a
-  snag, retrying" — never a stack trace. This is core, not polish.
-- **Manual tasks deep-link into the Wix dashboard** they already know. Never "run
-  this command".
+- **Review gates are visual.** A Wix builder judges a rendered site — that is literally
+  their craft. They do not review diffs. `WaitingForCodeReview` only exists in
+  `developer` mode.
+- **The AI fixes its own build failures.** `RunningChecks` self-heals before escalating.
+  Not because the user is incapable, but because making a designer debug a TypeScript
+  error is precisely the waste this tool exists to remove. This is core, not polish.
+- **But surface the failure detail when it matters.** A professional whose build failed
+  three times wants to know *what* broke. Do not hide it — put it **on the step that
+  failed**, one click away. A global log or a global "technical details" dump is clutter;
+  per-step detail on demand is respect.
+- **Manual tasks deep-link into the Wix dashboard** they already know. The value is
+  landing them on the exact page — not explaining what the page is. Never "run this
+  command".
 
 - **NEVER fabricate a user-facing URL.** If you do not *know* the link is real, ship
   no link. This rule exists because it was already broken once: a plausible-looking
@@ -72,9 +89,10 @@ programming. This is a hard constraint on everything user-facing.
   so these URLs must be *derived* from the site ID that provisioning returns — they
   cannot be hardcoded, and cannot exist before Phase 5. Verify every path against a
   live site before shipping it. The same goes for any other outward-facing URL.
-- **No jargon in the UI.** Never "artifact", "repository", "commit", "build", or
-  "stage". `STAGE_LABELS` in `@factory/shared` is the only place internal names
-  become human words.
+- **No ENGINEERING jargon in the UI.** Never "artifact", "repository", "commit",
+  "deploy", "schema", or "stage". Wix vocabulary (Stores, Bookings, CMS collections) is
+  fine and expected — these people speak it fluently. `STAGE_LABELS` in
+  `@factory/shared` is the only place internal names become human words.
 
 ## Convex guardrails
 
@@ -141,7 +159,12 @@ packages/worker/   the only thing with a filesystem
   workspace/       Workspace    (LocalWorkspace → RemoteWorkspace)     — where files live
   store/           ProjectStore (ConvexStore    → PostgresStore)       — where state lives
   stages/          one handler per runnable stage
-  services/        openai/ stitch/ claude/ wix/  ← never mixed
+  lib/             hash.ts (provenance), prompts.ts (load + hash prompt files)
+  services/        llm/ spec/ stitch/ claude/ wix/  ← never mixed
+                   llm/ resolves LLM_MODEL ("provider:model-id") via the AI SDK, so
+                   swapping model is config. The service interfaces (SpecGenerator,
+                   DesignGenerator, …) swap the STRATEGY; LLM_MODEL swaps the MODEL.
+                   Both axes matter — do not collapse them.
 packages/prompts/  versioned prompt files
 workspaces/        per-project checkouts — disposable, gitignored
 ```

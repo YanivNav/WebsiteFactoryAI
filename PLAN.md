@@ -8,7 +8,9 @@ Two principles drive everything below.
 
 **1. This is not a pipeline, it is a Project.** A project has a current stage, artifacts, approvals, logs, and manual tasks. The worker only advances it. No workflow engine in V1 — persisted project state *is* the workflow engine.
 
-**2. The user cannot read code.** They are Wix-literate business people — they know Stores, Bookings, CRM, CMS, and the Wix dashboard. They know nothing about programming. This is a hard constraint on the product surface, and it *removes* work rather than adding it (see below).
+**2. The user is a Wix professional, not a software engineer.** This is an **internal tool**. The users are Wix website builders who build sites for clients for a living. Wix vocabulary — Stores, Bookings, CMS collections, the dashboard — is native to them and is not jargon; software-engineering vocabulary is. They do not read code and never want to see a stack trace, but they are experts under time pressure juggling several client projects at once. So: dense and fast, never patronising — and never make them debug a build error, because throughput is the entire point.
+
+*(V2 may sell this to actual business owners, who genuinely cannot read anything technical. `settings.mode` already encodes both audiences — `developer` for today's internal user, `simple` for the future product. The plain-language layer stays alive for that; we just don't design for it now.)*
 
 ---
 
@@ -207,12 +209,15 @@ rejects the plan and it regenerates. We already have that channel; use it before
 
 ---
 
-## Designing for a non-programmer
+## Designing for a Wix professional
 
 This is a product constraint with real architectural consequences.
 
+**0. Dense, fast, and detail-on-demand.**
+They are juggling client projects, so the first question every morning is *"which site needs me right now?"* — status across many projects, at a glance, is the interface's main job. And when something fails they want to know **what** broke: do not hide it, but do not dump it either. Failure detail belongs **on the step that failed**, one click away. A global activity log and a global "technical details" panel are both clutter; per-step detail is respect.
+
 **1. Review gates must be visual, never code.**
-A Wix merchant cannot approve a diff. They *can* judge a rendered site. So `WaitingForCodeReview` **collapses** — the flow goes build → check → preview → **review the preview**.
+A Wix builder judges a rendered site — that is literally their craft. They do not review diffs. So `WaitingForCodeReview` **collapses** — the flow goes build → check → preview → **review the preview**.
 
 Gates are a per-project policy rather than hardcoded transitions:
 
@@ -223,8 +228,8 @@ gatePolicy: Set<Stage>                  // which Waiting* gates are active
 
 `simple` omits `WaitingForCodeReview`. `developer` enables it. The state machine consults the gate policy, so both modes share one flow.
 
-**2. Failures must never surface raw — the AI fixes its own mistakes.**
-`astro check: TS2304` is unactionable for this user. So the **self-healing loop is core Phase 5 work, not Phase 6 polish**:
+**2. The AI fixes its own mistakes before a human sees them.**
+Not because a Wix builder is incapable of reading `astro check: TS2304`, but because making a designer debug a TypeScript error is exactly the waste this tool exists to remove. So the **self-healing loop is core Phase 5 work, not Phase 6 polish**:
 
 ```
 RunningChecks fails → feed the build error back to Claude → fix → rebuild
