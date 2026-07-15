@@ -41,14 +41,12 @@ export const provisionWix: StageHandler = {
       tasks: [
         {
           title: "Upgrade to a Wix Premium plan",
-          description:
-            "Your site needs a Premium plan before it can go live on your own domain.",
+          description: "Your site needs a Premium plan before it can go live on your own domain.",
           blocking: true,
         },
         {
           title: "Connect a payment provider",
-          description:
-            "Optional for now — you can add this later if you want to take payments.",
+          description: "Optional for now — you can add this later if you want to take payments.",
           blocking: false,
         },
       ],

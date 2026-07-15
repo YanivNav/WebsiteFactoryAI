@@ -13,8 +13,8 @@ pausing whenever a human is needed and resuming afterwards.
 ## The two invariants
 
 **1. This is a Project, not a pipeline.** A project has a current stage, artifacts,
-approvals, logs, and manual tasks. The worker only *advances* it. There is no
-workflow engine and we do not need one — persisted state in Convex *is* the engine.
+approvals, logs, and manual tasks. The worker only _advances_ it. There is no
+workflow engine and we do not need one — persisted state in Convex _is_ the engine.
 
 **2. The user is a Wix professional, not a software engineer.** This is an **internal
 tool**: the users are Wix website builders who build sites for clients, all day, for a
@@ -26,10 +26,10 @@ They are **experts under time pressure, juggling several client projects at once
 be dense and fast, not spacious and hand-holding. Never patronise them. But never make
 them debug an Astro type error either — the point of this tool is throughput.
 
-*(V2 may sell this to actual business owners, who genuinely cannot read anything
+_(V2 may sell this to actual business owners, who genuinely cannot read anything
 technical. `settings.mode` already encodes both audiences: `developer` is today's
 internal user, `simple` is the future product. Keep `STAGE_LABELS` and the plain-language
-layer alive for that — just don't design for it now.)*
+layer alive for that — just don't design for it now.)_
 
 ## Rules that are load-bearing
 
@@ -48,7 +48,7 @@ layer alive for that — just don't design for it now.)*
   `v2`; it does not mutate `v1`.
 
 - **Convex holds the truth; the repository is derived state.** A lost workspace is a
-  lost *cache* — regenerate it from the approved specification and design.
+  lost _cache_ — regenerate it from the approved specification and design.
 
 - **Never mix service logic.** Wix logic does not go in Codex files. Prompts do not
   go in `services/wix/`. Each service sits behind its own interface
@@ -62,7 +62,7 @@ layer alive for that — just don't design for it now.)*
   spawn a process directly. This is what keeps "laptop" and "container" the same code.
 
 - **Codex is never told "build my website".** It gets the specification, the design,
-  the repository, `AGENTS.md`, and *one scoped task*.
+  the repository, `AGENTS.md`, and _one scoped task_.
 
 ## Consequences of who the user is
 
@@ -73,20 +73,20 @@ layer alive for that — just don't design for it now.)*
   Not because the user is incapable, but because making a designer debug a TypeScript
   error is precisely the waste this tool exists to remove. This is core, not polish.
 - **But surface the failure detail when it matters.** A professional whose build failed
-  three times wants to know *what* broke. Do not hide it — put it **on the step that
+  three times wants to know _what_ broke. Do not hide it — put it **on the step that
   failed**, one click away. A global log or a global "technical details" dump is clutter;
   per-step detail on demand is respect.
 - **Manual tasks deep-link into the Wix dashboard** they already know. The value is
   landing them on the exact page — not explaining what the page is. Never "run this
   command".
 
-- **NEVER fabricate a user-facing URL.** If you do not *know* the link is real, ship
+- **NEVER fabricate a user-facing URL.** If you do not _know_ the link is real, ship
   no link. This rule exists because it was already broken once: a plausible-looking
   `manage.wix.com/premium-purchase-plan` was invented and 404'd. For a user who cannot
   read code, a confident link to a dead page is unrecoverable — it is the exact failure
   this product exists to prevent, and it is worse than an absent link.
   Wix dashboard pages are **site-scoped** (`manage.wix.com/dashboard/{metaSiteId}/…`),
-  so these URLs must be *derived* from the site ID that provisioning returns — they
+  so these URLs must be _derived_ from the site ID that provisioning returns — they
   cannot be hardcoded, and cannot exist before Phase 5. Verify every path against a
   live site before shipping it. The same goes for any other outward-facing URL.
 - **No ENGINEERING jargon in the UI.** Never "artifact", "repository", "commit",
@@ -97,12 +97,12 @@ layer alive for that — just don't design for it now.)*
 ## Convex guardrails
 
 Convex was chosen for two things: **live-updating queries** (the user watches their
-site get built — that feeling *is* the product) and **serializable mutations** (the
+site get built — that feeling _is_ the product) and **serializable mutations** (the
 atomic lease is correct in ~15 lines). Both of those come with sharp edges. Respect
 these or you will hit them.
 
 - **Never hot-write the `projects` document.** Convex uses optimistic concurrency:
-  frequent writes to the same doc from the worker *while* the dashboard also writes
+  frequent writes to the same doc from the worker _while_ the dashboard also writes
   produce OCC retries and, under load, failures. So:
   - progress and log output → **`logs`, as separate append-only documents** (no
     contention, no shared row to fight over);
@@ -117,7 +117,7 @@ these or you will hit them.
 
 We may move to Postgres + Trigger.dev later — most plausibly at Phase 5, when the
 worker containerizes and Trigger.dev could become the executor outright. That is a
-cheap move *only if* these hold. They are not optional.
+cheap move _only if_ these hold. They are not optional.
 
 - **The worker NEVER imports Convex.** All state access goes through `ProjectStore`
   (`packages/worker/src/store/`). No exceptions, not even "just this one query".
@@ -190,6 +190,7 @@ emit canned artifacts. `FAKE_WORK_MS` widens the pause so you can kill the worke
 mid-stage. Phases 3–5 replace them one at a time; nothing else should need to move.
 
 Verified, not assumed:
+
 - A worker `kill -9`'d mid-stage leaves a stale lease; a fresh worker reclaims it after
   the TTL and **redoes the stage from scratch** — safe precisely because stages are
   deterministic from their inputs.

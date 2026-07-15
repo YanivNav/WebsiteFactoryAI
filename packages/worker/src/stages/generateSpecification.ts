@@ -9,11 +9,8 @@
  */
 
 import { hashInputs } from "../lib/hash.js";
-import {
-  LlmSpecGenerator,
-  type SpecGenerator,
-  type SpecInput,
-} from "../services/spec/index.js";
+import { LlmSpecGenerator, type SpecGenerator, type SpecInput } from "../services/spec/index.js";
+import { ClarifyingAnswerSet } from "@factory/shared";
 import type { StageHandler } from "./types.js";
 
 // Lazy, so a missing API key only breaks the stage that needs it — not the whole
@@ -36,9 +33,9 @@ export const generateSpecification: StageHandler = {
     // appears here and nowhere else — which is what makes the stage rerunnable, and
     // what makes `inputsHash` mean something. Reaching around this for "just one more
     // bit of context" is exactly how determinism dies.
-    const inputs: SpecInput = {
-      brief: ctx.brief,
-    };
+    const answerArtifact = await ctx.store.getLatestArtifact(ctx.projectId, "answers");
+    const answers = answerArtifact ? ClarifyingAnswerSet.parse(answerArtifact.data).answers : [];
+    const inputs: SpecInput = { brief: ctx.brief, answers };
 
     const { specification, promptHash } = await specGenerator().generate(inputs);
 

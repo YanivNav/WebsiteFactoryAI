@@ -73,11 +73,7 @@ export interface ProjectStore {
    * project is unleased but its result is not yet written — and another worker would
    * happily redo the stage.
    */
-  commitResult(
-    projectId: ProjectId,
-    workerId: string,
-    result: CommittedResult,
-  ): Promise<void>;
+  commitResult(projectId: ProjectId, workerId: string, result: CommittedResult): Promise<void>;
 
   // ── artifacts (append-only; never overwrite) ───────────────────────────────
   appendArtifact(input: {
@@ -88,6 +84,7 @@ export interface ProjectStore {
     inputsHash: string;
   }): Promise<ArtifactRecord>;
   getLatestApproved(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
+  getLatestArtifact(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
 
   // ── blobs ──────────────────────────────────────────────────────────────────
   /** Never inline a blob into a document. Store it, keep the id. */

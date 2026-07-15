@@ -12,7 +12,7 @@
  */
 
 import { generateObject } from "ai";
-import { ProjectSpecification, type Specification } from "@factory/shared";
+import { ProjectSpecification, type AnswerSet, type Specification } from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
 import { resolveModel } from "../llm/index.js";
 
@@ -27,8 +27,7 @@ import { resolveModel } from "../llm/index.js";
  */
 export interface SpecInput {
   brief: string;
-  // TODO(phase-3b): answers: Answer[] — from the clarifying-questions stage.
-  // Adding it here is ALL you do: it hashes itself, and rerun semantics stay correct.
+  answers: AnswerSet["answers"];
 }
 
 export interface SpecResult {
@@ -58,7 +57,12 @@ export class LlmSpecGenerator implements SpecGenerator {
       model: resolveModel(),
       schema: ProjectSpecification,
       instructions: prompt.text, // `system` is deprecated in AI SDK v7
-      prompt: input.brief,
+      prompt: [
+        `Client brief:\n${input.brief}`,
+        input.answers.length > 0
+          ? `Clarifying answers:\n${input.answers.map((answer) => `- ${answer.questionId}: ${answer.value}`).join("\n")}`
+          : "Clarifying answers: none required.",
+      ].join("\n\n"),
     });
 
     return { specification: object, promptHash: prompt.hash };

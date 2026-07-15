@@ -13,6 +13,8 @@
 
 export const STAGES = [
   "Draft",
+  "GeneratingQuestions",
+  "WaitingForAnswers",
   "GeneratingSpecification",
   "WaitingForSpecificationApproval",
   "GeneratingDesign",
@@ -37,6 +39,7 @@ export type Stage = (typeof STAGES)[number];
  */
 export const WAITING_STAGES = [
   "Draft",
+  "WaitingForAnswers",
   "WaitingForSpecificationApproval",
   "WaitingForDesignApproval",
   "WaitingForManualActions",
@@ -63,6 +66,8 @@ export function isRunnableStage(stage: Stage): boolean {
  */
 export const STAGE_LABELS: Record<Stage, string> = {
   Draft: "Draft",
+  GeneratingQuestions: "Reading your brief",
+  WaitingForAnswers: "A few quick questions",
   GeneratingSpecification: "Planning your site",
   WaitingForSpecificationApproval: "Review your site plan",
   GeneratingDesign: "Designing your site",

@@ -40,6 +40,7 @@ const FN = {
   commitResult: mut("worker:commitResult"),
   appendArtifact: mut("worker:appendArtifact"),
   appendLog: mut("worker:appendLog"),
+  getLatestArtifact: mut("worker:getLatestArtifact"),
   hasBlockingIncompleteTasks: mut("worker:hasBlockingIncompleteTasks"),
   claimChangeRequest: mut("worker:claimChangeRequest"),
   completeChangeRequest: mut("worker:completeChangeRequest"),
@@ -55,10 +56,7 @@ export class ConvexProjectStore implements ProjectStore {
     this.client = new ConvexHttpClient(url);
   }
 
-  async leaseNextRunnable(
-    workerId: string,
-    ttlSeconds: number,
-  ): Promise<LeasedProject | null> {
+  async leaseNextRunnable(workerId: string, ttlSeconds: number): Promise<LeasedProject | null> {
     return (await this.client.mutation(FN.leaseNextRunnable, {
       workerId,
       ttlSeconds,
@@ -100,6 +98,16 @@ export class ConvexProjectStore implements ProjectStore {
     return null;
   }
 
+  async getLatestArtifact(
+    projectId: ProjectId,
+    type: ArtifactType,
+  ): Promise<ArtifactRecord | null> {
+    return (await this.client.mutation(FN.getLatestArtifact, {
+      projectId,
+      type,
+    })) as ArtifactRecord | null;
+  }
+
   async putBlob(): Promise<string> {
     // TODO(phase-4): Stitch HTML + screenshots. Blobs never go inside documents.
     throw new Error("putBlob not implemented until Phase 4");
@@ -131,10 +139,7 @@ export class ConvexProjectStore implements ProjectStore {
     })) as { id: string; description: string } | null;
   }
 
-  async completeChangeRequest(
-    changeRequestId: string,
-    status: "done" | "failed",
-  ): Promise<void> {
+  async completeChangeRequest(changeRequestId: string, status: "done" | "failed"): Promise<void> {
     await this.client.mutation(FN.completeChangeRequest, {
       changeRequestId,
       status,

@@ -21,7 +21,7 @@ a booking flow, and an about page that establishes craft and credibility. They d
 ask for the about page. Include it. You know what a site like theirs requires.
 
 **Be specific to THIS business.** Every section description must say what goes in it for
-*this* business — real content intent, not a placeholder. Write "the three signature tea
+_this_ business — real content intent, not a placeholder. Write "the three signature tea
 blends, each with origin and tasting notes", never "a section showcasing products".
 Generic output here becomes generic output at every stage after it.
 
@@ -62,7 +62,7 @@ empty array. An empty array is a perfectly good answer and better than an invent
 ## When the brief is thin
 
 Fill the gaps with what a competent professional would assume for a business of this
-kind, and make those assumptions *visible in the specification* — the owner reviews and
+kind, and make those assumptions _visible in the specification_ — the owner reviews and
 corrects this document, so a wrong assumption stated plainly is useful, whereas a silent
 one is a trap. Never invent facts about the business itself: do not name their products,
 invent their prices, fabricate their address, or make up their history. Structure and

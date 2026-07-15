@@ -11,10 +11,22 @@
 }
 
 @layer base {
-  * { box-sizing: border-box; }
-  html, body { min-height: 100%; }
-  body { margin: 0; background: var(--color-canvas); color: var(--color-ink); }
-  button, a { -webkit-tap-highlight-color: transparent; }
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+  }
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
 
   input[type="search"]::-webkit-search-decoration,
   input[type="search"]::-webkit-search-cancel-button,
@@ -25,7 +37,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

@@ -11,6 +11,7 @@ import type { Stage } from "@factory/shared";
 import type { StageHandler } from "./types.js";
 
 import { generateSpecification } from "./generateSpecification.js";
+import { generateQuestions } from "./generateQuestions.js";
 import { generateDesign } from "./generateDesign.js";
 import { provisionWix } from "./provisionWix.js";
 import { generateCode } from "./generateCode.js";
@@ -19,6 +20,7 @@ import { generatePreview } from "./generatePreview.js";
 import { publish } from "./publish.js";
 
 export const HANDLERS: Partial<Record<Stage, StageHandler>> = {
+  GeneratingQuestions: generateQuestions,
   GeneratingSpecification: generateSpecification,
   GeneratingDesign: generateDesign,
   ProvisioningWix: provisionWix,
@@ -28,9 +30,4 @@ export const HANDLERS: Partial<Record<Stage, StageHandler>> = {
   Publishing: publish,
 };
 
-export type {
-  StageHandler,
-  StageContext,
-  StageResult,
-  ManualTaskDraft,
-} from "./types.js";
+export type { StageHandler, StageContext, StageResult, ManualTaskDraft } from "./types.js";

@@ -82,3 +82,46 @@ export const requestChanges = mutation({
     await ctx.db.patch(review.projectId, { currentStage: back, attempts: 0 });
   },
 });
+
+export const reviseSpecification = mutation({
+  args: { reviewId: v.id("reviews"), specification: v.any() },
+  handler: async (ctx, { reviewId, specification }) => {
+    const review = await ctx.db.get(reviewId);
+    if (!review || review.status !== "waiting" || review.artifactType !== "specification") return;
+    const project = await ctx.db.get(review.projectId);
+    if (!project || project.currentStage !== "WaitingForSpecificationApproval") return;
+    const existing = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_type", (q) =>
+        q.eq("projectId", review.projectId).eq("type", "specification"),
+      )
+      .collect();
+    const version = existing.length + 1;
+    const artifactId = await ctx.db.insert("artifacts", {
+      projectId: review.projectId,
+      type: "specification",
+      version,
+      data: specification,
+      promptHash: "",
+      inputsHash: "",
+    });
+    await ctx.db.patch(reviewId, {
+      status: "needs_changes",
+      comments: ["Edited in site plan review"],
+    });
+    await ctx.db.insert("reviews", {
+      projectId: review.projectId,
+      artifactId,
+      artifactType: "specification",
+      version,
+      status: "waiting",
+      comments: [],
+    });
+    await ctx.db.insert("logs", {
+      projectId: review.projectId,
+      stage: project.currentStage,
+      level: "info",
+      message: `Site plan edited — version ${version}`,
+    });
+  },
+});

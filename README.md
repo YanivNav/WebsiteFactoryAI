@@ -22,7 +22,7 @@ Draft → Planning your site → [review] → Designing your site → [review]
 ```
 
 The trick that makes human-in-the-loop free: **`Waiting*` stages are not runnable.**
-The worker only leases projects in a *work* stage. Approving something flips the stage,
+The worker only leases projects in a _work_ stage. Approving something flips the stage,
 and the worker picks it up on its next tick. There is no pause/resume code anywhere.
 
 ## Architecture
@@ -66,13 +66,13 @@ pnpm worker     # background worker (currently idles — no stages implemented)
 None are required for Phase 0. Each is needed at the phase noted; see
 [`.env.example`](.env.example).
 
-| Key | Needed for | Phase |
-|---|---|---|
-| `OPENAI_API_KEY` | Specification generation | 3 |
-| `STITCH_API_KEY` | Design generation (Google Stitch) | 4 |
-| `ANTHROPIC_API_KEY` | Code generation (Claude Agent SDK) | 5 |
-| `WIX_API_KEY` | `wix login --api-key` — provision, build, preview, publish | 5 |
-| `CONVEX_DEPLOYMENT`, `NEXT_PUBLIC_CONVEX_URL` | Dashboard ↔ Convex | 1 (auto-generated) |
+| Key                                           | Needed for                                                 | Phase              |
+| --------------------------------------------- | ---------------------------------------------------------- | ------------------ |
+| `OPENAI_API_KEY`                              | Specification generation                                   | 3                  |
+| `STITCH_API_KEY`                              | Design generation (Google Stitch)                          | 4                  |
+| `ANTHROPIC_API_KEY`                           | Code generation (Claude Agent SDK)                         | 5                  |
+| `WIX_API_KEY`                                 | `wix login --api-key` — provision, build, preview, publish | 5                  |
+| `CONVEX_DEPLOYMENT`, `NEXT_PUBLIC_CONVEX_URL` | Dashboard ↔ Convex                                         | 1 (auto-generated) |
 
 `GITHUB_TOKEN` is deliberately absent. GitHub is not in the critical path — the Wix CLI
 runs `git init` locally and `wix release` deploys from the local checkout.

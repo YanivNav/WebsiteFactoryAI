@@ -35,11 +35,7 @@ export interface StageContext {
   log(message: string, data?: Record<string, unknown>): Promise<void>;
 
   /** Append-only. Emitting a `specification` also opens the review gate for it. */
-  emitArtifact(
-    type: ArtifactTypeName,
-    data: unknown,
-    provenance: Provenance,
-  ): Promise<void>;
+  emitArtifact(type: ArtifactTypeName, data: unknown, provenance: Provenance): Promise<void>;
 }
 
 /**
@@ -59,6 +55,8 @@ export interface Provenance {
 
 export type ArtifactTypeName =
   | "brief"
+  | "questions"
+  | "answers"
   | "specification"
   | "design"
   | "buildReport"
@@ -68,6 +66,8 @@ export type ArtifactTypeName =
 export type StageResult =
   /** Work done. The machine resolves the actual next stage via `nextStage()`. */
   | { kind: "advance" }
+  /** Empty question sets skip the human gate; non-empty sets wait for answers. */
+  | { kind: "questions"; hasQuestions: boolean }
   /** Blocked on a human. Raises tasks and parks the project in WaitingForManualActions. */
   | { kind: "manualTasks"; tasks: ManualTaskDraft[] }
   /** Failed. The lease is released and the stage becomes leasable again. */

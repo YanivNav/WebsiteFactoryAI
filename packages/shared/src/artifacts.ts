@@ -8,6 +8,8 @@ import z from "zod";
 
 export const ARTIFACT_TYPES = [
   "brief",
+  "questions",
+  "answers",
   "specification",
   "design",
   "buildReport",
@@ -17,27 +19,46 @@ export const ARTIFACT_TYPES = [
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
-export const REVIEW_STATUSES = [
-  "waiting",
-  "approved",
-  "rejected",
-  "needs_changes",
-] as const;
+export const REVIEW_STATUSES = ["waiting", "approved", "rejected", "needs_changes"] as const;
 
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
 /** The collaboration queue. Serialized by the worker's lease, so merge conflicts
  *  are structurally impossible and conflict resolution never needs to exist. */
-export const CHANGE_REQUEST_STATUSES = [
-  "queued",
-  "running",
-  "done",
-  "failed",
-] as const;
+export const CHANGE_REQUEST_STATUSES = ["queued", "running", "done", "failed"] as const;
 
 export type ChangeRequestStatus = (typeof CHANGE_REQUEST_STATUSES)[number];
 
 export type PublishTarget = "wix-managed" | "custom";
+
+export const ClarifyingQuestionSet = z.object({
+  questions: z
+    .array(
+      z.object({
+        id: z.string().describe("Stable short identifier, lowercase snake_case"),
+        prompt: z.string().describe("One concise question phrased in Wix vocabulary"),
+        options: z
+          .array(
+            z.object({
+              id: z.string().describe("Stable short option identifier"),
+              label: z.string().describe("Short user-facing answer label"),
+            }),
+          )
+          .min(2)
+          .max(4),
+        allowCustom: z.boolean().describe("Whether a free-text answer is genuinely useful"),
+      }),
+    )
+    .max(5),
+});
+
+export const ClarifyingAnswerSet = z.object({
+  answers: z.array(z.object({ questionId: z.string(), value: z.string() })),
+});
+
+export type QuestionSet = z.infer<typeof ClarifyingQuestionSet>;
+export type ClarifyingQuestion = QuestionSet["questions"][number];
+export type AnswerSet = z.infer<typeof ClarifyingAnswerSet>;
 
 // TODO(phase-4): the Design shape (Stitch screens: HTML + screenshot per screen).
 
@@ -121,9 +142,7 @@ export const ProjectSpecification = z.object({
         path: z
           .string()
           .describe("URL path, lowercase, starting with a slash. The home page is '/'."),
-        description: z
-          .string()
-          .describe("What this page is for and what a visitor does on it"),
+        description: z.string().describe("What this page is for and what a visitor does on it"),
         sections: z
           .array(
             z.object({

@@ -27,10 +27,7 @@ export class LocalRunner implements JobRunner {
    * poll again immediately rather than sleeping).
    */
   async tick(): Promise<boolean> {
-    const project = await this.store.leaseNextRunnable(
-      this.workerId,
-      this.leaseTtlSeconds,
-    );
+    const project = await this.store.leaseNextRunnable(this.workerId, this.leaseTtlSeconds);
     if (!project) return false;
 
     const handler = HANDLERS[project.currentStage];
@@ -92,6 +89,11 @@ export class LocalRunner implements JobRunner {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "advance",
           next: nextStage(project.currentStage, project.settings.mode),
+        });
+      } else if (result.kind === "questions") {
+        await this.store.commitResult(project.id, this.workerId, {
+          kind: "advance",
+          next: result.hasQuestions ? "WaitingForAnswers" : "GeneratingSpecification",
         });
       } else if (result.kind === "manualTasks") {
         await this.store.commitResult(project.id, this.workerId, {

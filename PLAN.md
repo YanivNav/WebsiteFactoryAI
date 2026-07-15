@@ -6,17 +6,18 @@ Goal: a web application that turns a natural-language brief into a production Wi
 
 Two principles drive everything below.
 
-**1. This is not a pipeline, it is a Project.** A project has a current stage, artifacts, approvals, logs, and manual tasks. The worker only advances it. No workflow engine in V1 — persisted project state *is* the workflow engine.
+**1. This is not a pipeline, it is a Project.** A project has a current stage, artifacts, approvals, logs, and manual tasks. The worker only advances it. No workflow engine in V1 — persisted project state _is_ the workflow engine.
 
 **2. The user is a Wix professional, not a software engineer.** This is an **internal tool**. The users are Wix website builders who build sites for clients for a living. Wix vocabulary — Stores, Bookings, CMS collections, the dashboard — is native to them and is not jargon; software-engineering vocabulary is. They do not read code and never want to see a stack trace, but they are experts under time pressure juggling several client projects at once. So: dense and fast, never patronising — and never make them debug a build error, because throughput is the entire point.
 
-*(V2 may sell this to actual business owners, who genuinely cannot read anything technical. `settings.mode` already encodes both audiences — `developer` for today's internal user, `simple` for the future product. The plain-language layer stays alive for that; we just don't design for it now.)*
+_(V2 may sell this to actual business owners, who genuinely cannot read anything technical. `settings.mode` already encodes both audiences — `developer` for today's internal user, `simple` for the future product. The plain-language layer stays alive for that; we just don't design for it now.)_
 
 ---
 
 ## Verified findings (researched, load-bearing)
 
 **Wix CLI is fully scriptable — including auth.**
+
 - `npm create @wix/new@latest -- headless --folder-name X --business-name Y --site-template <name>` runs **non-interactively** (the docs explicitly recommend it for "automated scripts and AI agents"). It provisions the Wix business + site, installs dependencies, **runs `git init`**, builds, and publishes.
 - **`wix login --api-key <token>`** — "Authenticate using an API key for automations and CI environments." No browser needed. **A cloud worker is viable.**
 - `wix build` → build. `wix preview` → shareable versioned preview URL. `wix release` → publishes, returns live URL. `wix env set --key --value` → server-side env vars.
@@ -24,7 +25,7 @@ Two principles drive everything below.
 
 **Google Stitch has a real SDK** — `@google/stitch-sdk`, auth via `STITCH_API_KEY`. Methods: `create_project`, `project.generate(prompt, deviceType)`, `screen.getHtml()`, `screen.getImage()`, `screen.variants()`. Models `GEMINI_3_PRO` / `GEMINI_3_FLASH`. Output is **HTML + a screenshot per screen** — directly consumable by code generation.
 
-**Correction to the original stage order:** Wix provisioning must run **before** code generation. The scaffold *creates the repository*; running it afterwards would overwrite generated work. Manual actions move up next to it, since that is when login / premium / domain are actually needed.
+**Correction to the original stage order:** Wix provisioning must run **before** code generation. The scaffold _creates the repository_; running it afterwards would overwrite generated work. Manual actions move up next to it, since that is when login / premium / domain are actually needed.
 
 ---
 
@@ -56,7 +57,7 @@ Two principles drive everything below.
 Convex actions have execution limits and no filesystem. Code generation needs git, `npm install`, `wix build`, and an agent loop over real files.
 
 - **Convex** = persistent project state + work queue + realtime feed to the dashboard.
-- **Worker** = a separate Node process that *leases* a runnable project, executes one stage, writes artifacts back.
+- **Worker** = a separate Node process that _leases_ a runnable project, executes one stage, writes artifacts back.
 
 **The dashboard never touches a repo or a filesystem.** It is a view over Convex. This is why "dashboard on Vercel, worker elsewhere" is not a contradiction: the worker **pulls** work from Convex and needs **no inbound network address** — no webhook, no tunnel, no open port. Nothing in the cloud ever reads the worker's disk.
 
@@ -64,7 +65,7 @@ Convex actions have execution limits and no filesystem. Code generation needs gi
 
 **Local (`pnpm worker`) through Phase 4; containerize at Phase 5.**
 
-Phases 1–4 (skeleton, dashboard, spec, design) need **no filesystem at all** — they are API calls and Convex writes. So worker location is a non-decision until code generation lands. At Phase 5, deploy the *same process* to Railway/Fly with a persistent volume and `wix login --api-key`. Nothing else in the system changes.
+Phases 1–4 (skeleton, dashboard, spec, design) need **no filesystem at all** — they are API calls and Convex writes. So worker location is a non-decision until code generation lands. At Phase 5, deploy the _same process_ to Railway/Fly with a persistent volume and `wix login --api-key`. Nothing else in the system changes.
 
 All filesystem/shell access sits behind one interface, so this is a deploy target rather than a rewrite:
 
@@ -81,14 +82,14 @@ interface Workspace {
 
 V1 → `LocalWorkspace`. V2 → `RemoteWorkspace` (container volume). Business logic never changes.
 
-**Workspaces are warm, not re-cloned per stage.** `materialize()` reuses an existing checkout when HEAD matches; `node_modules` persists across stages and change requests. Re-cloning is the *recovery* path, not the hot path.
+**Workspaces are warm, not re-cloned per stage.** `materialize()` reuses an existing checkout when HEAD matches; `node_modules` persists across stages and change requests. Re-cloning is the _recovery_ path, not the hot path.
 
 ### What is actually durable
 
 - **Convex holds the truth**: brief, specification, design, approvals, stage. These are the **inputs**.
 - **The repo is derived state** — a function of (spec + design + config).
 
-A lost workspace is a lost *cache*, not a lost project: regenerate it by re-running code generation from the approved spec and design. This is exactly what the artifact model is for.
+A lost workspace is a lost _cache_, not a lost project: regenerate it by re-running code generation from the approved spec and design. This is exactly what the artifact model is for.
 
 **Therefore GitHub is not a foundation, it is a backup.** The Wix CLI `git init`s locally and `wix release` deploys **from the local checkout** — GitHub is not in the critical path to build or publish anything. It is cut from V1 and returns later as an **"Export to GitHub"** button for handoff.
 
@@ -104,7 +105,7 @@ The **lease already serializes execution** — only one code stage runs per proj
 
 A `ChangeRequest` ("make the hero blue, add a contact form", in plain English) puts a **Completed** project back into `GeneratingCode`, then flows through checks → preview → approval → publish → Completed.
 
-This reuses the entire machine — worker, artifacts, versions, reviews, logs, publish. **`Completed` is a resting state, not a terminal one.** After launch, this becomes the *primary* interface: the project is a living site the user edits by asking.
+This reuses the entire machine — worker, artifacts, versions, reviews, logs, publish. **`Completed` is a resting state, not a terminal one.** After launch, this becomes the _primary_ interface: the project is a living site the user edits by asking.
 
 ### Code engine
 
@@ -114,12 +115,12 @@ This reuses the entire machine — worker, artifacts, versions, reviews, logs, p
 
 Convex earns its place on two things:
 
-1. **Live-updating queries.** A non-programmer watching their site get built — the stage timeline, the activity feed, the preview appearing — *is* the product's sense of "something is happening for me." Convex gives this with no subscription plumbing, no SSE endpoint, no polling. On Postgres it would be the second-largest chunk of code in the app.
+1. **Live-updating queries.** A non-programmer watching their site get built — the stage timeline, the activity feed, the preview appearing — _is_ the product's sense of "something is happening for me." Convex gives this with no subscription plumbing, no SSE endpoint, no polling. On Postgres it would be the second-largest chunk of code in the app.
 2. **Serializable mutations.** `leaseNextRunnable` is a read-then-conditional-write that must be atomic or two workers run the same stage. In Convex it is ~15 lines and provably correct.
 
 **Two guardrails, because both strengths have sharp edges:**
 
-- **Never hot-write the `projects` document.** Convex uses optimistic concurrency; frequent writes to one doc from worker *and* dashboard cause OCC retries. Progress and log output go to **`logs` as separate append-only docs**; `projects` is written **only on a real stage transition**. Derive progress bars from `logs` — never tick a counter on `projects`.
+- **Never hot-write the `projects` document.** Convex uses optimistic concurrency; frequent writes to one doc from worker _and_ dashboard cause OCC retries. Progress and log output go to **`logs` as separate append-only docs**; `projects` is written **only on a real stage transition**. Derive progress bars from `logs` — never tick a counter on `projects`.
 - **Blobs never live inside documents.** Stitch HTML, screenshots, raw build output → file storage, keep the `storageId`.
 
 **The exit path (Convex → Neon + Trigger.dev), kept cheap by one rule:**
@@ -132,12 +133,12 @@ interface ProjectStore { ... }   // packages/worker/src/store/
 ```
 
 - **The worker never imports Convex.** All state access goes through `ProjectStore`. The worker holds all the business logic, so it is the only place portability actually costs anything.
-- **The dashboard may use Convex hooks directly** — realtime is *why* we chose Convex, and abstracting it away would discard the benefit. Confine the calls to a data/hooks layer.
+- **The dashboard may use Convex hooks directly** — realtime is _why_ we chose Convex, and abstracting it away would discard the benefit. Confine the calls to a data/hooks layer.
 - **Convex functions stay dumb:** CRUD + the atomic lease, zero business logic. The moment a gate rule or stage decision leaks into a mutation, the Postgres port stops being a mechanical translation and becomes a rewrite.
 
 Blast radius of a migration, if those hold: implement `ProjectStore` against Postgres, rewrite the dashboard's data hooks. The state machine, stage handlers, and services never notice.
 
-**When to revisit:** Phase 5. If Trigger.dev becomes the *executor* (it runs containers with a filesystem and long-running jobs — it could host the worker outright, not just schedule it), you get retries and a dead-letter queue for free, Convex's queue role shrinks to state + realtime, and "Neon + Trigger.dev" becomes a coherent and arguably simpler stack. Not a Phase-0 decision — and the plan already puts the containerization call there.
+**When to revisit:** Phase 5. If Trigger.dev becomes the _executor_ (it runs containers with a filesystem and long-running jobs — it could host the worker outright, not just schedule it), you get retries and a dead-letter queue for free, Convex's queue role shrinks to state + realtime, and "Neon + Trigger.dev" becomes a coherent and arguably simpler stack. Not a Phase-0 decision — and the plan already puts the containerization call there.
 
 ### Other decisions
 
@@ -150,7 +151,7 @@ Blast radius of a migration, if those hold: implement `ProjectStore` against Pos
 
 ## Clarifying questions (one textarea is not a brief)
 
-**The problem.** A user types *"a tea shop called Tea Top"* and we are expected to plan a
+**The problem.** A user types _"a tea shop called Tea Top"_ and we are expected to plan a
 website from it. We can't. The first prompt is almost never enough, and the gap gets
 silently papered over by the AI inventing assumptions — which then propagate all the way
 into the design and the code, where they are expensive to unwind. The specification stage
@@ -171,7 +172,7 @@ manual tasks do. No new mechanism, no pause/resume code, no special casing.
 
 **Four rules that make it good rather than annoying:**
 
-1. **Gap-driven, not blind.** The model is asked what it *cannot infer* from the brief, and
+1. **Gap-driven, not blind.** The model is asked what it _cannot infer_ from the brief, and
    nothing else. Do not ask what the brief already answers. "Tea Top sells tea" — so never
    ask "what do you sell". A question the user already answered reads as not listening.
 
@@ -182,8 +183,8 @@ manual tasks do. No new mechanism, no pause/resume code, no special casing.
 3. **Multiple choice by default, free text by exception.** Our user is a business person, not
    an author. Buttons and chips, phrased in Wix vocabulary they already own:
 
-   > *Do you want to sell tea online?*  ( Yes ) ( Not yet ) ( I already sell elsewhere )
-   > *Will you run workshops or tastings people book?*  ( Yes ) ( No )
+   > _Do you want to sell tea online?_ ( Yes ) ( Not yet ) ( I already sell elsewhere )
+   > _Will you run workshops or tastings people book?_ ( Yes ) ( No )
 
    Each answer maps onto a Wix business solution — Stores, Bookings, Blog, CRM. That mapping
    is the whole point: it is how a plain-language answer becomes a concrete site capability.
@@ -195,11 +196,11 @@ manual tasks do. No new mechanism, no pause/resume code, no special casing.
 artifact**, and `GeneratingSpecification` must resolve them explicitly, exactly like the brief.
 They are then folded into `inputsHash`. Get this wrong and the answers become hidden
 conversational context, which is precisely the thing the whole architecture forbids: rerun the
-stage tomorrow and it must behave the same, which means the answers have to be *inputs*, not
+stage tomorrow and it must behave the same, which means the answers have to be _inputs_, not
 memory.
 
 **This supersedes part of Phase 2's guided intake wizard.** A static wizard asks every user the
-same questions; this asks questions derived from *their actual brief*, which is strictly better.
+same questions; this asks questions derived from _their actual brief_, which is strictly better.
 So intake shrinks back to "name + describe it", and this stage does the real work. **Do not
 build both.**
 
@@ -214,7 +215,7 @@ rejects the plan and it regenerates. We already have that channel; use it before
 This is a product constraint with real architectural consequences.
 
 **0. Dense, fast, and detail-on-demand.**
-They are juggling client projects, so the first question every morning is *"which site needs me right now?"* — status across many projects, at a glance, is the interface's main job. And when something fails they want to know **what** broke: do not hide it, but do not dump it either. Failure detail belongs **on the step that failed**, one click away. A global activity log and a global "technical details" panel are both clutter; per-step detail is respect.
+They are juggling client projects, so the first question every morning is _"which site needs me right now?"_ — status across many projects, at a glance, is the interface's main job. And when something fails they want to know **what** broke: do not hide it, but do not dump it either. Failure detail belongs **on the step that failed**, one click away. A global activity log and a global "technical details" panel are both clutter; per-step detail is respect.
 
 **1. Review gates must be visual, never code.**
 A Wix builder judges a rendered site — that is literally their craft. They do not review diffs. So `WaitingForCodeReview` **collapses** — the flow goes build → check → preview → **review the preview**.
@@ -236,7 +237,7 @@ RunningChecks fails → feed the build error back to Claude → fix → rebuild
                     → up to N attempts → only then escalate
 ```
 
-Escalation shows *"We hit a snag while building your site — retrying"*, never a stack trace. Raw logs live behind a collapsed "Technical details" disclosure — for the operator, not the user.
+Escalation shows _"We hit a snag while building your site — retrying"_, never a stack trace. Raw logs live behind a collapsed "Technical details" disclosure — for the operator, not the user.
 
 **3. Manual tasks lean on the Wix dashboard they already know.**
 Each task carries a **deep link into the exact Wix dashboard page**, plain-language steps, and a "Done" button. Never "run this command." Examples: connect a payment provider, upgrade to Premium, verify a domain.
@@ -244,21 +245,21 @@ Each task carries a **deep link into the exact Wix dashboard page**, plain-langu
 **4. Plain language everywhere.**
 Internal enums stay (engineering clarity); a presentation layer maps them:
 
-| Internal stage | User sees |
-|---|---|
-| `GeneratingQuestions` | Reading your brief |
-| `WaitingForAnswers` | A few quick questions |
-| `GeneratingSpecification` | Planning your site |
-| `WaitingForSpecificationApproval` | Review your site plan |
-| `GeneratingDesign` | Designing your site |
-| `WaitingForDesignApproval` | Review your design |
-| `ProvisioningWix` | Setting up your Wix site |
-| `WaitingForManualActions` | Action needed from you |
-| `GeneratingCode` / `RunningChecks` | Building your site |
-| `GeneratingPreview` | Preparing your preview |
-| `WaitingForFinalApproval` | Review your site |
-| `Publishing` | Publishing |
-| `Completed` | Live |
+| Internal stage                     | User sees                |
+| ---------------------------------- | ------------------------ |
+| `GeneratingQuestions`              | Reading your brief       |
+| `WaitingForAnswers`                | A few quick questions    |
+| `GeneratingSpecification`          | Planning your site       |
+| `WaitingForSpecificationApproval`  | Review your site plan    |
+| `GeneratingDesign`                 | Designing your site      |
+| `WaitingForDesignApproval`         | Review your design       |
+| `ProvisioningWix`                  | Setting up your Wix site |
+| `WaitingForManualActions`          | Action needed from you   |
+| `GeneratingCode` / `RunningChecks` | Building your site       |
+| `GeneratingPreview`                | Preparing your preview   |
+| `WaitingForFinalApproval`          | Review your site         |
+| `Publishing`                       | Publishing               |
+| `Completed`                        | Live                     |
 
 No "artifact", "repository", "commit", "build", or "stage" in the UI.
 
@@ -363,13 +364,13 @@ Directories, config, empty module stubs, and the API-key checklist. Every stage 
 
 **API keys needed** (documented in `.env.example`; none required to complete Phase 0):
 
-| Key | Used by | Where to get it |
-|---|---|---|
-| `OPENAI_API_KEY` | Spec generation (Phase 3) | platform.openai.com |
-| `STITCH_API_KEY` | Design generation (Phase 4) | Stitch → Settings → API keys |
-| `ANTHROPIC_API_KEY` | Code generation (Phase 5) | console.anthropic.com |
-| `WIX_API_KEY` | `wix login --api-key` in the worker (Phase 5) | Wix → API Keys Manager |
-| `NEXT_PUBLIC_CONVEX_URL`, `CONVEX_DEPLOYMENT` | Dashboard ↔ Convex | generated by `npx convex dev` |
+| Key                                           | Used by                                       | Where to get it               |
+| --------------------------------------------- | --------------------------------------------- | ----------------------------- |
+| `OPENAI_API_KEY`                              | Spec generation (Phase 3)                     | platform.openai.com           |
+| `STITCH_API_KEY`                              | Design generation (Phase 4)                   | Stitch → Settings → API keys  |
+| `ANTHROPIC_API_KEY`                           | Code generation (Phase 5)                     | console.anthropic.com         |
+| `WIX_API_KEY`                                 | `wix login --api-key` in the worker (Phase 5) | Wix → API Keys Manager        |
+| `NEXT_PUBLIC_CONVEX_URL`, `CONVEX_DEPLOYMENT` | Dashboard ↔ Convex                            | generated by `npx convex dev` |
 
 `GITHUB_TOKEN` is deliberately **not** needed — GitHub is deferred (see V2).
 
@@ -386,19 +387,19 @@ Full stage machine end-to-end with **fake stage handlers** — each logs, emits 
 
 **Done when:** you create a project, watch it walk every stage pausing at each gate, then **kill the worker mid-stage, restart it, and it resumes correctly.**
 
-Prove crash-safety and resumability now, while the stages are fake and debugging is trivial. Every real integration afterwards lands in a system that already works. *Do not skip ahead to the fun OpenAI call.*
+Prove crash-safety and resumability now, while the stages are fake and debugging is trivial. Every real integration afterwards lands in a system that already works. _Do not skip ahead to the fun OpenAI call._
 
 ### Phase 2 — Dashboard (the non-programmer surface)
 
-*Partially built during Phase 1: plain-language stage label, activity feed, review panel, manual-task checklist, change-request box, "Technical details" disclosure.*
+_Partially built during Phase 1: plain-language stage label, activity feed, review panel, manual-task checklist, change-request box, "Technical details" disclosure._
 
 Still missing: **stage timeline** (you only see the current stage, not where you are in the journey), **version history** browsing (`design v1` vs `v2` is invisible today), **preview embed**, and the **specification rendered as a friendly summary** instead of raw JSON.
 
 Intake is **not** a wizard — it stays "name + describe it", because `GeneratingQuestions` (Phase 3) does the real elicitation, and does it better by tailoring the questions to the actual brief.
 
-**Sequencing note:** most of what remains here renders *real artifacts*. Building it against `{"fake": true}` data would mean building the wrong UI and then rebuilding it — so this lands after Phase 3.
+**Sequencing note:** most of what remains here renders _real artifacts_. Building it against `{"fake": true}` data would mean building the wrong UI and then rebuilding it — so this lands after Phase 3.
 
-### Phase 3 — Clarifying questions + Specification (real)
+### Phase 3 — Clarifying questions + Specification (real) ✅
 
 Two stages, one integration. The questions stage is what makes the specification worth anything — without it we are planning a website from a single sentence.
 
@@ -408,13 +409,13 @@ Two stages, one integration. The questions stage is what makes the specification
 
 Both stages sit behind the `SpecGenerator` / `QuestionGenerator` interfaces, so the model behind them is swappable without touching anything else.
 
-*This subsumes Phase 2's guided intake wizard — build one, not both.*
+_This subsumes Phase 2's guided intake wizard — build one, not both._
 
 ### Phase 4 — Design (real)
 
 `StitchDesignGenerator`: spec → Stitch project → screens. Persist HTML + screenshot per screen. Review UI is a **screen gallery**; rejection with comments regenerates → `Design v2`.
 
-### Phase 5 — Wix + Code (the heart) — *the worker moves to a container here*
+### Phase 5 — Wix + Code (the heart) — _the worker moves to a container here_
 
 - **ProvisioningWix:** non-interactive `npm create @wix/new@latest -- headless`; capture Wix project/site IDs.
 - **ManualActions:** auto-raise blocking tasks with Wix dashboard deep links. The worker will not pass a blocking incomplete task.
@@ -462,6 +463,6 @@ A user can:
 
 ## Explicitly deferred to V2
 
-Trigger.dev execution layer (`JobRunner` swap) · auth / multi-tenancy · `custom` publish target · **"Export to GitHub"** (handoff only — *not* collaboration) · alternative generators (Gemini / Codex / Cursor) · plugin system.
+Trigger.dev execution layer (`JobRunner` swap) · auth / multi-tenancy · `custom` publish target · **"Export to GitHub"** (handoff only — _not_ collaboration) · alternative generators (Gemini / Codex / Cursor) · plugin system.
 
 Each is already an interface in V1. None require touching business logic.

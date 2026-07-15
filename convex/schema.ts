@@ -19,6 +19,8 @@ import { v } from "convex/values";
 
 export const stageValidator = v.union(
   v.literal("Draft"),
+  v.literal("GeneratingQuestions"),
+  v.literal("WaitingForAnswers"),
   v.literal("GeneratingSpecification"),
   v.literal("WaitingForSpecificationApproval"),
   v.literal("GeneratingDesign"),
@@ -36,6 +38,8 @@ export const stageValidator = v.union(
 
 export const artifactTypeValidator = v.union(
   v.literal("brief"),
+  v.literal("questions"),
+  v.literal("answers"),
   v.literal("specification"),
   v.literal("design"),
   v.literal("buildReport"),
@@ -47,11 +51,7 @@ export default defineSchema({
   projects: defineTable({
     title: v.string(),
     owner: v.string(),
-    status: v.union(
-      v.literal("active"),
-      v.literal("failed"),
-      v.literal("completed"),
-    ),
+    status: v.union(v.literal("active"), v.literal("failed"), v.literal("completed")),
     currentStage: stageValidator,
     brief: v.string(),
     settings: v.object({
@@ -157,11 +157,7 @@ export default defineSchema({
     projectId: v.id("projects"),
     stage: stageValidator,
     attempt: v.number(),
-    status: v.union(
-      v.literal("running"),
-      v.literal("succeeded"),
-      v.literal("failed"),
-    ),
+    status: v.union(v.literal("running"), v.literal("succeeded"), v.literal("failed")),
     startedAt: v.number(),
     finishedAt: v.optional(v.number()),
     error: v.optional(v.string()),

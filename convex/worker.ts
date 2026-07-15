@@ -39,9 +39,7 @@ export const leaseNextRunnable = mutation({
 
       const project = candidates.find(
         (p) =>
-          p.status === "active" &&
-          (p.leaseWorkerId === undefined ||
-            (p.leaseExpiresAt ?? 0) < now), // stale lease → reclaim
+          p.status === "active" && (p.leaseWorkerId === undefined || (p.leaseExpiresAt ?? 0) < now), // stale lease → reclaim
       );
 
       if (!project) continue;
@@ -200,6 +198,8 @@ export const appendArtifact = mutation({
     projectId: v.id("projects"),
     type: v.union(
       v.literal("brief"),
+      v.literal("questions"),
+      v.literal("answers"),
       v.literal("specification"),
       v.literal("design"),
       v.literal("buildReport"),
@@ -214,9 +214,7 @@ export const appendArtifact = mutation({
     // Append-only: the new version is always max(existing) + 1. We never overwrite.
     const existing = await ctx.db
       .query("artifacts")
-      .withIndex("by_project_type", (q) =>
-        q.eq("projectId", args.projectId).eq("type", args.type),
-      )
+      .withIndex("by_project_type", (q) => q.eq("projectId", args.projectId).eq("type", args.type))
       .collect();
 
     const version = existing.length + 1;
@@ -239,15 +237,39 @@ export const appendArtifact = mutation({
   },
 });
 
+export const getLatestArtifact = mutation({
+  args: {
+    projectId: v.id("projects"),
+    type: v.union(
+      v.literal("brief"),
+      v.literal("questions"),
+      v.literal("answers"),
+      v.literal("specification"),
+      v.literal("design"),
+      v.literal("buildReport"),
+      v.literal("preview"),
+      v.literal("releaseReport"),
+    ),
+  },
+  handler: async (ctx, { projectId, type }) => {
+    const artifacts = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_type", (q) => q.eq("projectId", projectId).eq("type", type))
+      .collect();
+    const latest = artifacts.sort((a, b) => b.version - a.version)[0];
+    return latest
+      ? { id: latest._id, type: latest.type, version: latest.version, data: latest.data }
+      : null;
+  },
+});
+
 /** Claim the next queued change request — how a Completed project comes back to life. */
 export const claimChangeRequest = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, { projectId }) => {
     const next = await ctx.db
       .query("changeRequests")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", projectId).eq("status", "queued"),
-      )
+      .withIndex("by_project_status", (q) => q.eq("projectId", projectId).eq("status", "queued"))
       .first();
 
     if (!next) return null;

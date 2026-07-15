@@ -27,11 +27,7 @@ export const runChecks: StageHandler = {
 
     // TODO(phase-5): const result = await wix.build()
     //                if (!result.ok) → services/claude repair loop, N attempts
-    await ctx.emitArtifact(
-      "buildReport",
-      { fake: true, ok: true, errors: [] },
-      FAKE_PROVENANCE,
-    );
+    await ctx.emitArtifact("buildReport", { fake: true, ok: true, errors: [] }, FAKE_PROVENANCE);
 
     return { kind: "advance" };
   },

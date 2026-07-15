@@ -71,6 +71,37 @@ export const start = mutation({
   },
 });
 
+export const submitAnswers = mutation({
+  args: {
+    projectId: v.id("projects"),
+    answers: v.array(v.object({ questionId: v.string(), value: v.string() })),
+  },
+  handler: async (ctx, { projectId, answers }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("Project not found");
+    if (project.currentStage !== "WaitingForAnswers") return;
+    const existing = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_type", (q) => q.eq("projectId", projectId).eq("type", "answers"))
+      .collect();
+    await ctx.db.insert("artifacts", {
+      projectId,
+      type: "answers",
+      version: existing.length + 1,
+      data: { answers },
+      promptHash: "",
+      inputsHash: "",
+    });
+    await ctx.db.insert("logs", {
+      projectId,
+      stage: "WaitingForAnswers",
+      level: "info",
+      message: "Questions answered",
+    });
+    await ctx.db.patch(projectId, { currentStage: "GeneratingSpecification", attempts: 0 });
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) =>
