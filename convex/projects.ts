@@ -222,7 +222,6 @@ export const retryCurrentStage = mutation({
     });
     await ctx.db.patch(projectId, {
       attempts: 0,
-      lastError: undefined,
       leaseWorkerId: undefined,
       leaseExpiresAt: undefined,
       status: "active",

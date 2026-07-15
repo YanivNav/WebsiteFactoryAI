@@ -14,9 +14,11 @@
     "@ai-sdk/openai": "^4.0.11",
     "@factory/shared": "workspace:*",
     "@google/stitch-sdk": "^0.3.5",
+    "@wix/cli": "^1.1.226",
     "ai": "^7.0.23",
     "convex": "^1.17.0",
     "dotenv": "^16.4.7",
+    "node-pty": "^1.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

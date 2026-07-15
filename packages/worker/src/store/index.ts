@@ -23,7 +23,7 @@
  */
 
 import type { ArtifactType, Stage } from "@factory/shared";
-import type { StageResult } from "../stages/types.js";
+import type { StageResult } from "../stages";
 
 /** IDs are opaque strings at this boundary. Never leak `Id<"projects">` past it. */
 export type ProjectId = string;
@@ -33,7 +33,12 @@ export interface LeasedProject {
   id: ProjectId;
   currentStage: Stage;
   brief: string;
-  settings: { mode: "simple" | "developer"; publishTarget: string };
+  settings: {
+    mode: "simple" | "developer";
+    publishTarget: string;
+    businessName?: string;
+    siteTemplate?: string;
+  };
   attempts: number;
 }
 
@@ -47,6 +52,11 @@ export interface ArtifactRecord {
 /** What `commitResult` records. `advance` carries the stage the worker computed. */
 export type CommittedResult =
   | { kind: "advance"; next: Stage }
+  | {
+      kind: "wixProvisioned";
+      next: Stage;
+      wix: { projectId?: string; siteId: string; appId: string };
+    }
   | { kind: "manualTasks"; tasks: unknown[] }
   | { kind: "failed"; error: string };
 

@@ -51,7 +51,6 @@ export const leaseNextRunnable = mutation({
       await ctx.db.patch(project._id, {
         leaseWorkerId: workerId,
         leaseExpiresAt: now + ttlSeconds * 1000,
-        lastError: undefined,
       });
 
       await ctx.db.insert("stageRuns", {
@@ -118,6 +117,15 @@ export const commitResult = mutation({
     result: v.union(
       v.object({ kind: v.literal("advance"), next: stageValidator }),
       v.object({
+        kind: v.literal("wixProvisioned"),
+        next: stageValidator,
+        wix: v.object({
+          projectId: v.optional(v.string()),
+          siteId: v.string(),
+          appId: v.string(),
+        }),
+      }),
+      v.object({
         kind: v.literal("manualTasks"),
         tasks: v.array(
           v.object({
@@ -150,6 +158,18 @@ export const commitResult = mutation({
         attempts: 0,
         lastError: undefined,
         status: result.next === "Completed" ? "completed" : "active",
+      });
+      return;
+    }
+
+    if (result.kind === "wixProvisioned") {
+      await finishStageRun(ctx, project, "succeeded");
+      await ctx.db.patch(projectId, {
+        ...releaseLease,
+        currentStage: result.next,
+        attempts: 0,
+        lastError: undefined,
+        wix: { ...project.wix, ...result.wix },
       });
       return;
     }

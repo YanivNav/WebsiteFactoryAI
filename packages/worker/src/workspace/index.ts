@@ -30,7 +30,11 @@ export interface Workspace {
   /** Reuse the checkout if HEAD matches; otherwise clone or scaffold it. */
   materialize(projectId: string): Promise<void>;
 
-  exec(cmd: string, args: string[]): Promise<ExecResult>;
+  exec(
+    cmd: string,
+    args: string[],
+    options?: { cwd?: "root" | "parent"; env?: Record<string, string>; tty?: boolean },
+  ): Promise<ExecResult>;
 
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
@@ -42,5 +46,5 @@ export interface Workspace {
   push(): Promise<void>;
 }
 
-// TODO(phase-5): LocalWorkspace implements Workspace.
+export { LocalWorkspace } from "./local.js";
 // TODO(v2):      RemoteWorkspace implements Workspace.

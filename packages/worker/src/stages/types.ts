@@ -28,6 +28,11 @@ export interface StageContext {
   stage: Stage;
   brief: string;
   mode: ProjectMode;
+  settings: {
+    publishTarget: string;
+    businessName?: string;
+    siteTemplate?: string;
+  };
   attempts: number;
   store: ProjectStore;
 
@@ -70,6 +75,11 @@ export type StageResult =
   | { kind: "route"; next: Stage }
   /** Empty question sets skip the human gate; non-empty sets wait for answers. */
   | { kind: "questions"; hasQuestions: boolean }
+  /** Provisioning commits the Wix identity and next stage in one project write. */
+  | {
+      kind: "wixProvisioned";
+      wix: { projectId?: string; siteId: string; appId: string };
+    }
   /** Blocked on a human. Raises tasks and parks the project in WaitingForManualActions. */
   | { kind: "manualTasks"; tasks: ManualTaskDraft[] }
   /** Failed. The lease is released and the stage becomes leasable again. */

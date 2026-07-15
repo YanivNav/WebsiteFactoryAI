@@ -11,9 +11,9 @@
 
 import { nextStage } from "@factory/shared";
 import type { JobRunner } from "./index.js";
-import type { ProjectStore } from "../store/index.js";
-import { HANDLERS } from "../stages/index.js";
-import type { StageContext } from "../stages/types.js";
+import type { ProjectStore } from "../store";
+import { HANDLERS } from "../stages";
+import type { StageContext } from "../stages";
 
 export class LocalRunner implements JobRunner {
   constructor(
@@ -73,6 +73,7 @@ export class LocalRunner implements JobRunner {
         stage: project.currentStage,
         brief: project.brief,
         mode: project.settings.mode,
+        settings: project.settings,
         attempts: project.attempts,
         store: this.store,
         log: async (message, data) => {
@@ -125,6 +126,13 @@ export class LocalRunner implements JobRunner {
           next,
         });
         console.log(`${prefix} completed → ${next}`);
+      } else if (result.kind === "wixProvisioned") {
+        await this.store.commitResult(project.id, this.workerId, {
+          kind: "wixProvisioned",
+          next: "GeneratingCode",
+          wix: result.wix,
+        });
+        console.log(`${prefix} completed → GeneratingCode`);
       } else if (result.kind === "manualTasks") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "manualTasks",

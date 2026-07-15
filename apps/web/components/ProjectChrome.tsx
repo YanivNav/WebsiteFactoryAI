@@ -111,10 +111,12 @@ export function LifecycleRail({
                   title={canReturn ? `Return to ${step.label}` : undefined}
                 >
                   <span
-                    className={`relative z-[1] grid size-6 shrink-0 place-items-center rounded-full border text-white ${complete ? "border-primary bg-primary" : active ? "border-primary bg-primary ring-4 ring-[#d8e2ff]" : "border-[#c2c6d6] bg-[#f3f4f5]"}`}
+                    className={`relative z-[1] grid size-6 shrink-0 place-items-center rounded-full border text-white ${complete ? "border-primary bg-primary" : active && lastError ? "border-[#a82922] bg-[#a82922] ring-4 ring-[#f8d9d6]" : active ? "border-primary bg-primary ring-4 ring-[#d8e2ff]" : "border-[#c2c6d6] bg-[#f3f4f5]"}`}
                   >
                     {complete ? (
                       <Check size={13} />
+                    ) : active && lastError ? (
+                      <CircleAlert size={13} />
                     ) : active ? (
                       <LoaderCircle
                         className={isWaitingStage(stage) ? "" : "animate-spin"}
@@ -132,21 +134,17 @@ export function LifecycleRail({
                     </p>
                     <p className="mt-0.5 text-[11px] text-[#737b88]">
                       {active
-                        ? isWaitingStage(stage)
-                          ? "Awaiting your input"
-                          : "In progress"
+                        ? lastError
+                          ? "Failed"
+                          : isWaitingStage(stage)
+                            ? "Awaiting your input"
+                            : "In progress"
                         : complete
                           ? canReturn
                             ? "Complete · click to return"
                             : "Complete"
                           : "Queued"}
                     </p>
-                    {active && lastError && (
-                      <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#a82922]">
-                        <CircleAlert size={12} />
-                        Failed
-                      </p>
-                    )}
                   </div>
                 </div>
               </li>

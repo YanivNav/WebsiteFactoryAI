@@ -64,6 +64,7 @@ export default defineSchema({
       v.object({
         projectId: v.optional(v.string()),
         siteId: v.optional(v.string()),
+        appId: v.optional(v.string()),
         liveUrl: v.optional(v.string()),
         previewUrl: v.optional(v.string()),
       }),
