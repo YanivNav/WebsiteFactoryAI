@@ -35,10 +35,14 @@ export interface StageContext {
     siteTemplate?: string;
   };
   attempts: number;
+  planningCycle?: number;
   store: ProjectStore;
 
   /** Structured logging. Never rely on raw AI messages for state — log explicitly. */
   log(message: string, data?: Record<string, unknown>): Promise<void>;
+
+  /** Report determinate progress for the current unit of work. */
+  progress(percent: number, label: string): Promise<void>;
 
   /** Append-only. Emitting a `specification` also opens the review gate for it. */
   emitArtifact(type: ArtifactTypeName, data: unknown, provenance: Provenance): Promise<void>;
@@ -63,6 +67,9 @@ export type ArtifactTypeName =
   | "brief"
   | "questions"
   | "answers"
+  | "businessRequirements"
+  | "wixCapabilitySnapshot"
+  | "wixSolutionArchitecture"
   | "specification"
   | "design"
   | "buildReport"
@@ -86,7 +93,7 @@ export type StageResult =
   /** Blocked on a human. Raises tasks and parks the project in WaitingForManualActions. */
   | { kind: "manualTasks"; tasks: ManualTaskDraft[] }
   /** Failed. The lease is released and the stage becomes leasable again. */
-  | { kind: "failed"; error: string };
+  | { kind: "failed"; error: string; retryable: boolean };
 
 export interface ManualTaskDraft {
   title: string;

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LoaderCircle } from "lucide-react";
-import type { ReviewFeedback, Specification } from "@factory/shared";
+import type { ReviewFeedback, SolutionArchitecture, Specification } from "@factory/shared";
 import type { ArtifactVersion, PendingReview } from "@/data/useProjectDetail";
 import { SpecificationSummary } from "../SpecificationSummary";
 import { ReviewActions } from "./ReviewActions";
@@ -15,12 +15,14 @@ export function SpecificationReview({
   onRequestChanges,
   onReviseSpecification,
   review,
+  solutionArchitecture,
   versions,
 }: {
   onApprove: () => void;
   onRequestChanges: (feedback: ReviewFeedback[]) => Promise<unknown>;
   onReviseSpecification: (spec: Specification) => Promise<unknown>;
   review: PendingReview;
+  solutionArchitecture?: SolutionArchitecture;
   versions: Array<ArtifactVersion<Specification>>;
 }) {
   const [selectedVersion, setSelectedVersion] = useState(review.version);
@@ -81,7 +83,7 @@ export function SpecificationReview({
           </div>
         </>
       ) : (
-        displayed && <SpecificationSummary spec={displayed} />
+        displayed && <SpecificationSummary architecture={solutionArchitecture} spec={displayed} />
       )}
 
       <ReviewActions

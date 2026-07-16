@@ -478,6 +478,61 @@ _This subsumes Phase 2's guided intake wizard — build one, not both._
   abstraction.
 - Add retry/backoff, dead-letter handling, and cost/token telemetry per stage.
 
+### Smart Planning refactor — agentic Wix solutions architecture
+
+Replace the one-shot questions → specification guess with an evidence-backed planning system built
+on AI SDK agents, skills, and typed tools:
+
+- **Adaptive discovery:** ask a thorough first round of conditional business questions, assess the
+  accumulated answers, and ask focused follow-ups until the important visitor journeys are
+  unambiguous. Question rounds and accumulated answers are durable artifacts.
+- **Business requirements first:** model audiences, content ownership, visitor journeys, dynamic
+  context, business outcomes, operational needs, and acceptance criteria without prematurely
+  choosing a Wix product.
+- **Persisted Wix capability research:** a read-only research agent uses current official Wix
+  documentation and runtime inspection tools. The selected evidence, SDK/API versions, limitations,
+  and source URLs are saved and hashed so changing external documentation is never hidden state.
+- **Wix solution architecture:** a specialist agent maps each requirement to the best current Wix
+  solution or custom Headless workflow, records rejected alternatives and reasoning, identifies
+  backend work, and derives acceptance tests. A dynamic course syllabus workflow, for example,
+  should select custom inputs → Wix contact → triggered email rather than a static Wix Form merely
+  because inputs are visible.
+- **Tool-driven execution:** provisioning uses typed, scoped Wix tools and runtime-derived schemas;
+  skills teach solution patterns. Do not turn untrusted prose directly into unrestricted mutation
+  tools. Persist every capability/tool schema used as an input.
+- **Generated human work:** only raise a manual action after the executor proves the remaining step
+  cannot be automated safely. Tasks carry structured instructions, required values, validation, and
+  a verified Wix dashboard destination when one is known.
+- **Scoped implementation:** generate foundation, data access, backend workflows, interactive
+  components, and pages as separate tasks from the approved architecture rather than one monolithic
+  “build the website” prompt.
+
+Keep the agent runtime behind an `AgentRuntime` interface. Use AI SDK 7 first because the existing
+Convex project state, leases, waiting stages, and `Workspace` already supply durable orchestration.
+Re-evaluate Eve when the worker moves to cloud sandboxes; adopting another durable state machine
+before then would duplicate the project model.
+
+### Automated website QA — after Smart Planning and agentic implementation
+
+Add `RunningWebsiteQA` between preview creation and final approval. The solution architecture
+generates an acceptance-test plan from its visitor journeys; QA runs those tests against the real
+Wix preview and preserves them as the site's regression suite.
+
+- Visit every route; detect broken navigation, assets, console errors, and failed requests.
+- Exercise dialogs, forms, search, filters, responsive layouts, loading/empty/error/success states,
+  and accessibility basics.
+- Verify Wix business effects, including dynamic page context, contacts, CMS data, bookings,
+  checkout, and triggered email inputs—not merely that a button was clicked.
+- Compare rendered pages with approved designs and capture screenshots as evidence.
+- Send failures to scoped repair agents, rerun affected tests, and stop after a bounded repair budget.
+- Present a concise report (`passed`, `repaired automatically`, `needs attention`) with per-check
+  evidence. Keep raw browser and network output as debugging detail, not the main experience.
+- Re-run the accumulated regression suite after every later change request before final approval.
+
+Build a representative evaluation corpus alongside this phase: dynamic syllabus delivery, Store +
+Bookings, paid events, restricted member content, CMS directories, multi-location businesses,
+custom quotes, and deliberately simple sites that should not receive unnecessary Wix products.
+
 ---
 
 ## Verification

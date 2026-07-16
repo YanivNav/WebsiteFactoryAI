@@ -30,6 +30,7 @@ export const create = mutation({
         publishTarget: "wix-managed",
       },
       attempts: 0,
+      planningCycle: 1,
     });
 
     // The brief is itself an artifact — the first durable input. Everything
@@ -41,6 +42,7 @@ export const create = mutation({
       data: { brief },
       promptHash: "",
       inputsHash: "",
+      planningCycle: 1,
     });
 
     await ctx.db.insert("logs", {
@@ -85,13 +87,28 @@ export const submitAnswers = mutation({
       .query("artifacts")
       .withIndex("by_project_type", (q) => q.eq("projectId", projectId).eq("type", "answers"))
       .collect();
+    const planningCycle = project.planningCycle ?? 1;
+    const latestAnswers = existing
+      .filter((artifact) => (artifact.planningCycle ?? 1) === planningCycle)
+      .sort((a, b) => b.version - a.version)[0]?.data as
+      { answers?: Array<{ questionId?: string; value?: string }> } | undefined;
+    const previousAnswers = (latestAnswers?.answers ?? []).flatMap((answer) =>
+      answer.questionId && answer.value
+        ? [{ questionId: answer.questionId, value: answer.value }]
+        : [],
+    );
+    const accumulated = new Map(previousAnswers.map((answer) => [answer.questionId, answer.value]));
+    for (const answer of answers) accumulated.set(answer.questionId, answer.value);
     await ctx.db.insert("artifacts", {
       projectId,
       type: "answers",
       version: existing.length + 1,
-      data: { answers },
+      data: {
+        answers: [...accumulated].map(([questionId, value]) => ({ questionId, value })),
+      },
       promptHash: "",
       inputsHash: "",
+      planningCycle,
     });
     await ctx.db.insert("logs", {
       projectId,
@@ -99,7 +116,63 @@ export const submitAnswers = mutation({
       level: "info",
       message: "Questions answered",
     });
-    await ctx.db.patch(projectId, { currentStage: "GeneratingSpecification", attempts: 0 });
+    await ctx.db.patch(projectId, { currentStage: "GeneratingQuestions", attempts: 0 });
+  },
+});
+
+/**
+ * Begin a genuinely fresh planning pass from the durable original brief. Saved
+ * versions remain available for history, but questions, answers, feedback, and the
+ * previous specification from older planning cycles are not inputs to the new pass.
+ */
+export const restartFromBrief = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("Project not found");
+
+    const openReviews = (
+      await ctx.db
+        .query("reviews")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect()
+    ).filter((review) => review.status === "waiting" || review.status === "needs_changes");
+    for (const review of openReviews) {
+      await ctx.db.patch(review._id, {
+        status: "rejected",
+        comments: [...review.comments, { comment: "Closed after starting again from the brief" }],
+      });
+    }
+
+    const runningStageRuns = (
+      await ctx.db
+        .query("stageRuns")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect()
+    ).filter((run) => run.status === "running");
+    for (const run of runningStageRuns) {
+      await ctx.db.patch(run._id, {
+        status: "failed",
+        finishedAt: Date.now(),
+        error: "Stopped after starting again from the brief",
+      });
+    }
+
+    await ctx.db.insert("logs", {
+      projectId,
+      stage: project.currentStage,
+      level: "info",
+      message: "Started a new site plan from the original brief",
+    });
+    await ctx.db.patch(projectId, {
+      currentStage: "GeneratingQuestions",
+      status: "active",
+      attempts: 0,
+      lastError: undefined,
+      leaseWorkerId: undefined,
+      leaseExpiresAt: undefined,
+      planningCycle: (project.planningCycle ?? 1) + 1,
+    });
   },
 });
 
@@ -219,9 +292,11 @@ export const retryCurrentStage = mutation({
       stage: project.currentStage,
       level: "info",
       message: "Retry requested",
+      data: { kind: "retry-requested" },
     });
     await ctx.db.patch(projectId, {
       attempts: 0,
+      lastError: undefined,
       leaseWorkerId: undefined,
       leaseExpiresAt: undefined,
       status: "active",
@@ -258,32 +333,32 @@ export const detail = query({
 
     const [artifacts, reviews, manualTasks, logs, changeRequests, designProgress] =
       await Promise.all([
-      ctx.db
-        .query("artifacts")
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .collect(),
-      ctx.db
-        .query("reviews")
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .collect(),
-      ctx.db
-        .query("manualTasks")
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .collect(),
-      ctx.db
-        .query("logs")
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .order("desc")
-        .take(100),
-      ctx.db
-        .query("changeRequests")
-        .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
-        .collect(),
-      ctx.db
-        .query("designProgress")
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .collect(),
-    ]);
+        ctx.db
+          .query("artifacts")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .collect(),
+        ctx.db
+          .query("reviews")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .collect(),
+        ctx.db
+          .query("manualTasks")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .collect(),
+        ctx.db
+          .query("logs")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .order("desc")
+          .take(100),
+        ctx.db
+          .query("changeRequests")
+          .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
+          .collect(),
+        ctx.db
+          .query("designProgress")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .collect(),
+      ]);
 
     const artifactStorageIds = artifacts.flatMap((artifact) => {
       if (artifact.type !== "design") return [];
@@ -329,7 +404,12 @@ export const detail = query({
           })),
       ),
       // The gate the user is currently sitting at, if any.
-      pendingReview: reviews.find((r) => r.status === "waiting") ?? null,
+      pendingReview:
+        reviews.find((review) => {
+          if (review.status !== "waiting") return false;
+          const artifact = artifacts.find((item) => item._id === review.artifactId);
+          return artifact && (artifact.planningCycle ?? 1) === (project.planningCycle ?? 1);
+        }) ?? null,
     };
   },
 });

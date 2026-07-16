@@ -48,10 +48,10 @@ async function main(): Promise<void> {
   const store = new ConvexProjectStore(CONVEX_URL!, LEASE_TTL_SECONDS);
   const runner = new LocalRunner(store, WORKER_INSTANCE_ID, LEASE_TTL_SECONDS);
 
-  console.log(`[worker ${WORKER_INSTANCE_ID}] started — polling ${CONVEX_URL}`);
+  console.error(`[worker ${WORKER_INSTANCE_ID}] started — polling ${CONVEX_URL}`);
 
   const shutdown = (signal: string) => {
-    console.log(`[worker ${WORKER_INSTANCE_ID}] ${signal} — shutting down`);
+    console.error(`[worker ${WORKER_INSTANCE_ID}] ${signal} — shutting down`);
     running = false;
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`[worker ${WORKER_INSTANCE_ID}] stopped`);
+  console.error(`[worker ${WORKER_INSTANCE_ID}] stopped`);
 }
 
 void main();

@@ -16,6 +16,7 @@ import {
   type DesignScreenStatus,
   type QuestionSet,
   type ReviewFeedback,
+  type SolutionArchitecture,
   type Specification,
   type Stage,
 } from "@factory/shared";
@@ -33,6 +34,11 @@ export interface DesignScreenView {
   pagePath: string;
   status: DesignScreenStatus;
   screenshotUrl: string | null;
+}
+
+export interface StageProgressView {
+  label: string;
+  percent: number;
 }
 
 /** The review gate the user is currently sitting at, with the artifact under review. */
@@ -53,17 +59,18 @@ export interface ProjectDetail {
   specificationVersions: Array<ArtifactVersion<Specification>>;
   designVersions: Array<ArtifactVersion<Design>>;
   questions: QuestionSet | undefined;
+  manualTasks: Array<Doc<"manualTasks">>;
   blockingTasks: Array<Doc<"manualTasks">>;
   changeRequests: Array<Doc<"changeRequests">>;
   designProgress: DesignScreenView[];
+  stageProgress: StageProgressView | null;
+  solutionArchitecture: SolutionArchitecture | undefined;
   /** storageId → URL for design artifact assets (screenshots, HTML). */
   assetUrls: Record<string, string | null>;
 }
 
 export type ProjectDetailResult =
-  | { status: "loading" }
-  | { status: "not-found" }
-  | { status: "ready"; detail: ProjectDetail };
+  { status: "loading" } | { status: "not-found" } | { status: "ready"; detail: ProjectDetail };
 
 export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult {
   const data = useQuery(api.projects.detail, { projectId });
@@ -94,6 +101,18 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
           }
         : null;
 
+    const attemptBoundary = data.logs.findIndex((log) => {
+      const kind = (log.data as { kind?: string } | undefined)?.kind;
+      return kind === "attempt-started" || kind === "retry-requested";
+    });
+    const currentAttemptLogs =
+      attemptBoundary >= 0 ? data.logs.slice(0, attemptBoundary) : data.logs;
+    const progressLog = currentAttemptLogs.find(
+      (log) => (log.data as { kind?: string } | undefined)?.kind === "stage-progress",
+    );
+    const progressData = progressLog?.data as
+      { kind: "stage-progress"; percent?: number; label?: string } | undefined;
+
     return {
       project: data.project,
       stage,
@@ -102,9 +121,21 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
       specificationVersions,
       designVersions,
       questions: artifactVersions<QuestionSet>(data.artifacts, "questions")[0]?.data,
+      manualTasks: [...data.manualTasks].sort((a, b) => a._creationTime - b._creationTime),
       blockingTasks: data.manualTasks.filter((task) => !task.completed),
       changeRequests: data.changeRequests,
       designProgress: data.designProgress,
+      stageProgress:
+        typeof progressData?.percent === "number"
+          ? {
+              label: progressData.label ?? progressLog?.message ?? STAGE_LABELS[stage],
+              percent: Math.max(0, Math.min(100, progressData.percent)),
+            }
+          : null,
+      solutionArchitecture: artifactVersions<SolutionArchitecture>(
+        data.artifacts,
+        "wixSolutionArchitecture",
+      )[0]?.data,
       assetUrls: data.assetUrls,
     };
   }, [data]);
@@ -134,6 +165,7 @@ export function useProjectActions(projectId: Id<"projects">) {
   const createChangeRequest = useMutation(api.changeRequests.create);
   const submitAnswers = useMutation(api.projects.submitAnswers);
   const returnToPhase = useMutation(api.projects.returnToPhase);
+  const restartFromBrief = useMutation(api.projects.restartFromBrief);
   const retryCurrentStage = useMutation(api.projects.retryCurrentStage);
 
   return useMemo(
@@ -143,13 +175,14 @@ export function useProjectActions(projectId: Id<"projects">) {
         requestChanges({ reviewId, feedback }),
       reviseSpecification: (reviewId: Id<"reviews">, specification: Specification) =>
         reviseSpecification({ reviewId, specification }),
-      completeTask: (taskId: Id<"manualTasks">) => completeTask({ taskId }),
-      createChangeRequest: (description: string) =>
-        createChangeRequest({ projectId, description }),
+      completeTask: (taskId: Id<"manualTasks">, configurationValue?: string) =>
+        completeTask({ taskId, configurationValue }),
+      createChangeRequest: (description: string) => createChangeRequest({ projectId, description }),
       submitAnswers: (answers: Array<{ questionId: string; value: string }>) =>
         submitAnswers({ projectId, answers }),
       returnToPhase: (phase: Parameters<typeof returnToPhase>[0]["phase"]) =>
         returnToPhase({ projectId, phase }),
+      restartFromBrief: () => restartFromBrief({ projectId }),
       retryCurrentStage: () => retryCurrentStage({ projectId }),
     }),
     [
@@ -158,6 +191,7 @@ export function useProjectActions(projectId: Id<"projects">) {
       createChangeRequest,
       projectId,
       requestChanges,
+      restartFromBrief,
       retryCurrentStage,
       returnToPhase,
       reviseSpecification,

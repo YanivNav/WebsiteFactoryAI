@@ -40,9 +40,11 @@ const FN = {
   getStorageUrl: mut("worker:getStorageUrl"),
   getLatestReviewFeedback: mut("worker:getLatestReviewFeedback"),
   getLatestReviewContext: mut("worker:getLatestReviewContext"),
+  consumeLatestReviewFeedback: mut("worker:consumeLatestReviewFeedback"),
   resetDesignProgress: mut("worker:resetDesignProgress"),
   updateDesignProgress: mut("worker:updateDesignProgress"),
   hasBlockingIncompleteTasks: mut("worker:hasBlockingIncompleteTasks"),
+  getManualTaskStatuses: mut("worker:getManualTaskStatuses"),
   claimChangeRequest: mut("worker:claimChangeRequest"),
   completeChangeRequest: mut("worker:completeChangeRequest"),
 } as const;
@@ -86,12 +88,19 @@ export class ConvexProjectStore implements ProjectStore {
     data: unknown;
     promptHash: string;
     inputsHash: string;
+    planningCycle?: number;
   }): Promise<ArtifactRecord> {
     const res = (await this.client.mutation(FN.appendArtifact, input)) as {
       id: string;
       version: number;
     };
-    return { id: res.id, type: input.type, version: res.version, data: input.data };
+    return {
+      id: res.id,
+      type: input.type,
+      version: res.version,
+      data: input.data,
+      planningCycle: input.planningCycle,
+    };
   }
 
   async getLatestApproved(
@@ -134,10 +143,11 @@ export class ConvexProjectStore implements ProjectStore {
     })) as { feedback: ReviewFeedback[]; artifact: ArtifactRecord } | null;
   }
 
-  async resetDesignProgress(
-    projectId: ProjectId,
-    screens: DesignScreenProgress[],
-  ): Promise<void> {
+  async consumeLatestReviewFeedback(projectId: ProjectId, type: ArtifactType): Promise<void> {
+    await this.client.mutation(FN.consumeLatestReviewFeedback, { projectId, type });
+  }
+
+  async resetDesignProgress(projectId: ProjectId, screens: DesignScreenProgress[]): Promise<void> {
     await this.client.mutation(FN.resetDesignProgress, { projectId, screens });
   }
 
@@ -185,6 +195,14 @@ export class ConvexProjectStore implements ProjectStore {
     return (await this.client.mutation(FN.hasBlockingIncompleteTasks, {
       projectId,
     })) as boolean;
+  }
+
+  async getManualTaskStatuses(
+    projectId: ProjectId,
+  ): Promise<Array<{ title: string; completed: boolean; configurationValue?: string }>> {
+    return (await this.client.mutation(FN.getManualTaskStatuses, {
+      projectId,
+    })) as Array<{ title: string; completed: boolean; configurationValue?: string }>;
   }
 
   async nextQueuedChangeRequest(

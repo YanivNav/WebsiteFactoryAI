@@ -28,10 +28,10 @@ export const provisionWix: StageHandler = {
   stage: "ProvisioningWix",
 
   async run(ctx) {
-    await ctx.log("Setting up your Wix site");
+    await ctx.progress(5, "Starting Wix setup");
     const workspace = new LocalWorkspace(ctx.projectId);
     wixService ??= new WixCliService();
-    await ctx.log("Creating the Wix-managed site and project files");
+    await ctx.progress(15, "Creating your Wix site");
     const wix = await wixService.provision(
       {
         projectId: ctx.projectId,
@@ -40,13 +40,14 @@ export const provisionWix: StageHandler = {
       },
       workspace,
     );
-    await ctx.log("Backing up the project to GitHub");
+    await ctx.progress(70, "Backing up your project");
     githubService ??= new GitHubRestService();
     const github = await githubService.ensureRepository({
       projectId: ctx.projectId,
       projectTitle: ctx.projectTitle,
       workspace,
     });
+    await ctx.progress(95, "Finishing Wix setup");
     await ctx.log("Wix site is ready", {
       kind: "wix-provisioned",
       siteId: wix.siteId,

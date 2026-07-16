@@ -24,7 +24,16 @@ import { sha256 } from "./hash.js";
 const PROMPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../prompts");
 
 export type PromptName =
-  "questions" | "spec" | "design" | "screen-change" | "code" | "fix" | "site-agents";
+  | "questions"
+  | "requirements"
+  | "wix-research"
+  | "wix-architecture"
+  | "spec"
+  | "design"
+  | "screen-change"
+  | "code"
+  | "fix"
+  | "site-agents";
 
 export interface Prompt {
   readonly name: PromptName;

@@ -2,6 +2,7 @@
 
 import { use, useState } from "react";
 import { CircleAlert, LoaderCircle } from "lucide-react";
+import type { Stage } from "@factory/shared";
 import type { Id } from "@convex/_generated/dataModel";
 import { useProjectActions, useProjectDetail, type ProjectDetail } from "@/data/useProjectDetail";
 import { LifecycleRail } from "@/components/LifecycleRail";
@@ -13,6 +14,17 @@ import { ReturnToPhaseDialog } from "@/components/ReturnToPhaseDialog";
 import { ReviewWorkspace } from "@/components/review/ReviewWorkspace";
 import { WorkingWorkspace } from "@/components/WorkingWorkspace";
 import type { ReturnPhase } from "@/helpers/projectPhases";
+
+const CHECKLIST_STAGES = new Set<Stage>([
+  "WaitingForManualActions",
+  "GeneratingCode",
+  "WaitingForCodeReview",
+  "RunningChecks",
+  "GeneratingPreview",
+  "WaitingForFinalApproval",
+  "Publishing",
+  "Completed",
+]);
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -53,6 +65,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     }
   }
 
+  async function restartFromBrief() {
+    setReturningToPhase(true);
+    try {
+      await actions.restartFromBrief();
+      setPendingPhaseReturn(null);
+    } finally {
+      setReturningToPhase(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#f8f9fa]">
       <ProjectHeader projectTitle={detail.project.title} stage={detail.stage} />
@@ -66,14 +88,33 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <main className="min-w-0 flex-1 p-4 md:p-6">
           <div className="mx-auto max-w-5xl">
             <Workspace actions={actions} detail={detail} />
+            {detail.manualTasks.length > 0 &&
+              CHECKLIST_STAGES.has(detail.stage) &&
+              detail.stage !== "WaitingForManualActions" && (
+                <div className="mt-6">
+                  <ManualActions
+                    onComplete={actions.completeTask}
+                    projectTitle={detail.project.title}
+                    tasks={detail.manualTasks}
+                    wixSiteId={detail.project.wix?.siteId}
+                  />
+                </div>
+              )}
           </div>
         </main>
       </div>
       {pendingPhaseReturn && (
         <ReturnToPhaseDialog
+          alreadyInPhase={
+            pendingPhaseReturn.phase === "sitePlan" &&
+            detail.stage === "WaitingForSpecificationApproval"
+          }
           label={pendingPhaseReturn.label}
           onCancel={() => setPendingPhaseReturn(null)}
           onConfirm={confirmPhaseReturn}
+          onRestartFromBrief={
+            pendingPhaseReturn.phase === "sitePlan" ? restartFromBrief : undefined
+          }
           submitting={returningToPhase}
         />
       )}
@@ -101,6 +142,7 @@ function Workspace({
         onReviseSpecification={(spec) => actions.reviseSpecification(review.id, spec)}
         project={detail.project}
         review={review}
+        solutionArchitecture={detail.solutionArchitecture}
         specificationVersions={detail.specificationVersions}
       />
     );
@@ -114,12 +156,13 @@ function Workspace({
       />
     );
   }
-  if (detail.stage === "WaitingForManualActions" && detail.blockingTasks.length > 0) {
+  if (detail.stage === "WaitingForManualActions" && detail.manualTasks.length > 0) {
     return (
       <ManualActions
         onComplete={actions.completeTask}
         projectTitle={detail.project.title}
-        tasks={detail.blockingTasks}
+        wixSiteId={detail.project.wix?.siteId}
+        tasks={detail.manualTasks}
       />
     );
   }

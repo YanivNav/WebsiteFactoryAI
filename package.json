@@ -13,6 +13,7 @@
     "build": "pnpm --filter @factory/web build",
     "typecheck": "pnpm -r --no-bail typecheck",
     "lint": "pnpm --filter @factory/web lint",
+    "test": "pnpm -r --if-present test",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -22,6 +23,7 @@
   "devDependencies": {
     "convex": "^1.17.0",
     "prettier": "^3.9.5",
+    "prettier-plugin-astro": "^0.14.1",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "typescript": "^5.9.3"
   }

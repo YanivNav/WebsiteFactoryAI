@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
-import type { ReviewFeedback, Specification } from "@factory/shared";
+import type { ReviewFeedback, SolutionArchitecture, Specification } from "@factory/shared";
 import type { ArtifactVersion, PendingReview } from "@/data/useProjectDetail";
 import type { Design } from "@factory/shared";
 import { DesignReview } from "./DesignReview";
@@ -27,6 +27,7 @@ export function ReviewWorkspace({
   onReviseSpecification,
   project,
   review,
+  solutionArchitecture,
   specificationVersions,
 }: {
   assetUrls: Record<string, string | null>;
@@ -36,6 +37,7 @@ export function ReviewWorkspace({
   onReviseSpecification: (spec: Specification) => Promise<unknown>;
   project: { title: string; wix?: { previewUrl?: string } };
   review: PendingReview;
+  solutionArchitecture?: SolutionArchitecture;
   specificationVersions: Array<ArtifactVersion<Specification>>;
 }) {
   return (
@@ -47,6 +49,7 @@ export function ReviewWorkspace({
           onRequestChanges={onRequestChanges}
           onReviseSpecification={onReviseSpecification}
           review={review}
+          solutionArchitecture={solutionArchitecture}
           versions={specificationVersions}
         />
       ) : review.artifactType === "design" ? (
@@ -79,8 +82,8 @@ function ReviewHeader({ title, version }: { title: string; version: number }) {
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{title}</h1>
           <p className="mt-2 max-w-3xl text-sm leading-5 text-[#596170]">
-            Check the work below against the client brief. Approve it to continue automatically,
-            or leave one clear change request.
+            Check the work below against the client brief. Approve it to continue automatically, or
+            leave one clear change request.
           </p>
         </div>
         <span className="text-primary hidden size-10 place-items-center rounded-full bg-[#edf5ff] sm:grid">

@@ -15,7 +15,7 @@ export function DesignProgress({ detail }: StageProgressViewProps) {
   const screens = detail.designProgress;
   const [preview, setPreview] = useState<{ pageTitle: string; imageUrl: string } | null>(null);
   const readyCount = screens.filter((screen) => screen.status === "ready").length;
-  const progressPercent = Math.min(100, (readyCount / Math.max(1, screens.length)) * 100);
+  const progressPercent = detail.stageProgress?.percent ?? 0;
   return (
     <section className="border-outline rounded border bg-white p-5">
       <div className="flex items-end justify-between gap-4">
@@ -26,7 +26,7 @@ export function DesignProgress({ detail }: StageProgressViewProps) {
           <h2 className="mt-1 text-lg font-semibold">Your screens are taking shape</h2>
         </div>
         <span className="text-xs font-semibold text-[#596170]">
-          {readyCount} / {screens.length}
+          {readyCount} / {screens.length} · {progressPercent}%
         </span>
       </div>
       <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#e1e3e6]">
@@ -82,7 +82,9 @@ function ScreenProgressCard({
     <article
       className={`border-outline overflow-hidden rounded border bg-white ${generating ? "ring-primary ring-2 ring-offset-2" : ""}`}
     >
-      {screen.screenshotUrl ? (
+      {generating || !screen.screenshotUrl ? (
+        <SkeletonScreen />
+      ) : (
         <button
           className="group block aspect-[16/10] w-full overflow-hidden bg-[#eef0f2]"
           onClick={() => onPreview(screen.screenshotUrl!)}
@@ -94,8 +96,6 @@ function ScreenProgressCard({
             src={screen.screenshotUrl}
           />
         </button>
-      ) : (
-        <SkeletonScreen />
       )}
       <div className="flex items-center justify-between px-3 py-2.5">
         <strong className="text-xs">{screen.pageTitle}</strong>

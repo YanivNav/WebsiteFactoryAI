@@ -1,7 +1,7 @@
 "use client";
 
-import { CalendarDays, Database, FileText, ShoppingCart } from "lucide-react";
-import type { Specification } from "@factory/shared";
+import { CalendarDays, Database, FileText, ShoppingCart, Workflow } from "lucide-react";
+import type { SolutionArchitecture, Specification } from "@factory/shared";
 
 const SOLUTION_LABELS: Record<string, string> = {
   stores: "Online Store",
@@ -19,7 +19,13 @@ const SOLUTION_ICONS: Record<string, typeof ShoppingCart> = {
   blog: FileText,
 };
 
-export function SpecificationSummary({ spec }: { spec: Specification }) {
+export function SpecificationSummary({
+  architecture,
+  spec,
+}: {
+  architecture?: SolutionArchitecture;
+  spec: Specification;
+}) {
   return (
     <div className="space-y-5">
       <section className="border-outline rounded border bg-white p-5 shadow-sm md:p-6">
@@ -74,6 +80,74 @@ export function SpecificationSummary({ spec }: { spec: Specification }) {
           </article>
         ))}
       </section>
+
+      {spec.infrastructure.visitorWorkflows.length > 0 && (
+        <section className="border-outline rounded border bg-white p-5">
+          <h3 className="flex items-center gap-2 text-xs font-bold tracking-[0.1em] text-[#424754] uppercase">
+            <Workflow size={16} className="text-primary" />
+            Visitor workflows
+          </h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {spec.infrastructure.visitorWorkflows.map((workflow) => (
+              <article
+                className="rounded border border-[#e1e3e4] bg-[#f8f9fa] p-3"
+                key={workflow.id}
+              >
+                <p className="text-xs font-semibold">{workflow.name}</p>
+                <p className="mt-1 text-xs leading-4 text-[#596170]">{workflow.description}</p>
+                <ol className="mt-3 space-y-1 text-[11px] text-[#424754]">
+                  {workflow.actions.map((action, index) => (
+                    <li key={`${action.type}-${index}`}>
+                      {index + 1}. {action.description}
+                      {action.requiresManualSetup ? " · Wix setup required" : ""}
+                    </li>
+                  ))}
+                </ol>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {architecture && architecture.journeySolutions.length > 0 && (
+        <section className="border-outline rounded border bg-white p-5">
+          <h3 className="flex items-center gap-2 text-xs font-bold tracking-[0.1em] text-[#424754] uppercase">
+            <Workflow size={16} className="text-primary" />
+            Wix solution decisions
+          </h3>
+          <p className="mt-2 text-xs leading-5 text-[#596170]">{architecture.summary}</p>
+          <div className="mt-4 space-y-3">
+            {architecture.journeySolutions.map((solution) => (
+              <article
+                className="rounded border border-[#e1e3e4] bg-[#f8f9fa] p-3"
+                key={solution.journeyId}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold">{solution.pattern}</p>
+                  <span className="text-[10px] font-bold tracking-[0.08em] text-[#596170] uppercase">
+                    {solution.wixCapabilities.join(" + ") || "Custom Headless"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-4 text-[#596170]">{solution.rationale}</p>
+                {solution.rejectedAlternatives.length > 0 && (
+                  <details className="mt-2 text-[11px] text-[#596170]">
+                    <summary className="cursor-pointer font-semibold">
+                      Alternatives considered
+                    </summary>
+                    <ul className="mt-1 space-y-1 pl-3">
+                      {solution.rejectedAlternatives.map((alternative) => (
+                        <li key={alternative.pattern}>
+                          {alternative.pattern}: {alternative.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {spec.infrastructure.cmsCollections.length > 0 && (
         <section className="border-outline rounded border bg-white p-5">

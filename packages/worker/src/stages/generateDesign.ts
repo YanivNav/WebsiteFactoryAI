@@ -1,6 +1,6 @@
 import {
   ProjectDesign,
-  ProjectSpecification,
+  parseProjectSpecification,
   type Design,
   type DesignScreenProgress,
 } from "@factory/shared";
@@ -29,10 +29,21 @@ export const generateDesign: StageHandler = {
   stage: "GeneratingDesign",
 
   async run(ctx) {
-    await ctx.log("Designing your site");
+    await ctx.progress(5, "Preparing your design");
     const specificationArtifact = await ctx.store.getLatestApproved(ctx.projectId, "specification");
     if (!specificationArtifact) throw new Error("No approved site plan found");
-    const specification = ProjectSpecification.parse(specificationArtifact.data);
+    const specification = parseProjectSpecification(specificationArtifact.data);
+
+    // Remove stale rows from an earlier design run before feedback classification or
+    // network work begins. The UI must never show old screens as this run's progress.
+    await ctx.store.resetDesignProgress(
+      ctx.projectId,
+      specification.pages.map((page) => ({
+        pageTitle: page.title,
+        pagePath: page.path,
+        status: "queued",
+      })),
+    );
 
     // Feedback arrives structured; an item with `screen` targets one design screen.
     const reviewContext = await ctx.store.getLatestReviewContext(ctx.projectId, "design");
@@ -47,18 +58,57 @@ export const generateDesign: StageHandler = {
       screenFeedback.length > 0 && reviewContext
         ? ProjectDesign.parse(reviewContext.artifact.data)
         : undefined;
+    const latestApprovedDesign = await ctx.store.getLatestApproved(ctx.projectId, "design");
+
+    // A plan-only change often adds implementation detail without changing routes or
+    // visual structure. Reuse the approved screens exactly when their route set still
+    // matches; do not regenerate pixels merely because a new plan version exists.
+    if (feedback.length === 0 && latestApprovedDesign) {
+      const approvedDesign = ProjectDesign.parse(latestApprovedDesign.data);
+      const desktopScreens = approvedDesign.screens.filter(
+        (screen) => screen.viewport === "desktop",
+      );
+      const plannedPaths = new Set(specification.pages.map((page) => page.path));
+      const screenPaths = new Set(desktopScreens.map((screen) => screen.pagePath));
+      const sameRoutes =
+        plannedPaths.size === screenPaths.size &&
+        [...plannedPaths].every((path) => screenPaths.has(path));
+      if (sameRoutes) {
+        await ctx.store.resetDesignProgress(
+          ctx.projectId,
+          desktopScreens.map((screen) => ({
+            pageTitle: screen.pageTitle,
+            pagePath: screen.pagePath,
+            status: "ready",
+            screenshotStorageId: screen.screenshotStorageId,
+          })),
+        );
+        await ctx.progress(90, "Existing designs still match the updated site plan");
+        await ctx.emitArtifact("design", approvedDesign, {
+          promptHash: "",
+          inputsHash: hashInputs({
+            specification,
+            reusedDesignVersion: latestApprovedDesign.version,
+          }),
+        });
+        return { kind: "advance" };
+      }
+    }
 
     // Turn each piece of screen feedback into concrete operations. The classifier may
     // instead decide the feedback changes the site's structure — then we replan.
     const classificationPromptHashes: string[] = [];
     const screensToRemove: string[] = [];
     const screenRevisions: ScreenRevision[] = [];
-    for (const item of screenFeedback) {
+    for (const [feedbackIndex, item] of screenFeedback.entries()) {
       const sourceScreen = previousDesign?.screens.find(
         (screen) => screen.stitchScreenId === item.screen.screenId,
       );
       if (!sourceScreen) throw new Error(`Screen ${item.screen.pageTitle} is no longer available`);
-      await ctx.log(`Understanding your feedback for ${item.screen.pageTitle}`);
+      await ctx.progress(
+        6 + ((feedbackIndex + 1) / Math.max(1, screenFeedback.length)) * 8,
+        `Understanding your feedback for ${item.screen.pageTitle}`,
+      );
       feedbackClassifier ??= new LlmScreenFeedbackClassifier();
       const decision = await feedbackClassifier.classify({
         screenId: item.screen.screenId,
@@ -115,6 +165,7 @@ export const generateDesign: StageHandler = {
       ctx.projectId,
       planProgress(specification, screens, screenRevisions, Boolean(previousDesign)),
     );
+    await ctx.progress(10, "Preparing your screen designs");
 
     const inputs = {
       specification,
@@ -133,7 +184,8 @@ export const generateDesign: StageHandler = {
         promptHash: hashInputs(classificationPromptHashes),
         inputsHash: hashInputs(inputs),
       });
-      await ctx.log(`${screens.length} desktop screens ready for review`);
+      await ctx.store.consumeLatestReviewFeedback(ctx.projectId, "design");
+      await ctx.progress(95, "Preparing your design for review");
       return { kind: "advance" };
     }
 
@@ -142,9 +194,14 @@ export const generateDesign: StageHandler = {
       { specification, feedback: feedbackNotes, previousDesign, screenRevisions },
       {
         onProgress: (message) => ctx.log(message),
-        onScreenStart: (screen) =>
-          ctx.store.updateDesignProgress(ctx.projectId, { ...screen, status: "generating" }),
-        onScreenReady: async (screen) => {
+        onScreenStart: async (screen, index, total) => {
+          await ctx.store.updateDesignProgress(ctx.projectId, { ...screen, status: "generating" });
+          await ctx.progress(
+            15 + (index / Math.max(1, total)) * 70,
+            `Generating ${screen.pageTitle}`,
+          );
+        },
+        onScreenReady: async (screen, index, total) => {
           const [htmlStorageId, screenshotStorageId] = await Promise.all([
             ctx.store.putBlob(screen.html, screen.htmlContentType),
             ctx.store.putBlob(screen.screenshot, screen.screenshotContentType),
@@ -168,11 +225,15 @@ export const generateDesign: StageHandler = {
             status: "ready",
             screenshotStorageId,
           });
+          await ctx.progress(
+            15 + ((index + 1) / Math.max(1, total)) * 75,
+            `${screen.pageTitle} design ready`,
+          );
           await ctx.log(`${screen.pageTitle} preview ready`);
         },
       },
     );
-    await ctx.log("Finalizing your design");
+    await ctx.progress(95, "Preparing your design for review");
 
     const design = ProjectDesign.parse({ stitchProjectId: generated.stitchProjectId, screens });
     await ctx.emitArtifact("design", design, {
@@ -182,6 +243,7 @@ export const generateDesign: StageHandler = {
           : generated.promptHash,
       inputsHash: hashInputs(inputs),
     });
+    if (reviewContext) await ctx.store.consumeLatestReviewFeedback(ctx.projectId, "design");
     await ctx.log(`${screens.length} desktop screens ready for review`);
     return { kind: "advance" };
   },

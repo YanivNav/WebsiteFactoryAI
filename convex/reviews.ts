@@ -118,38 +118,20 @@ export const reviseSpecification = mutation({
     if (!review || review.status !== "waiting" || review.artifactType !== "specification") return;
     const project = await ctx.db.get(review.projectId);
     if (!project || project.currentStage !== "WaitingForSpecificationApproval") return;
-    const existing = await ctx.db
-      .query("artifacts")
-      .withIndex("by_project_type", (q) =>
-        q.eq("projectId", review.projectId).eq("type", "specification"),
-      )
-      .collect();
-    const version = existing.length + 1;
-    const artifactId = await ctx.db.insert("artifacts", {
-      projectId: review.projectId,
-      type: "specification",
-      version,
-      data: specification,
-      promptHash: "",
-      inputsHash: "",
-    });
+    const editRequest = `The Wix professional edited the site plan directly. Treat the complete edited plan below as authoritative business feedback, then regenerate the requirements, Wix architecture, and reviewable site plan so they remain consistent:\n${JSON.stringify(specification)}`;
     await ctx.db.patch(reviewId, {
       status: "needs_changes",
-      comments: [{ comment: "Edited in site plan review" }],
-    });
-    await ctx.db.insert("reviews", {
-      projectId: review.projectId,
-      artifactId,
-      artifactType: "specification",
-      version,
-      status: "waiting",
-      comments: [],
+      comments: [{ comment: editRequest }],
     });
     await ctx.db.insert("logs", {
       projectId: review.projectId,
       stage: project.currentStage,
       level: "info",
-      message: `Site plan edited — version ${version}`,
+      message: "Site plan edits submitted for replanning",
+    });
+    await ctx.db.patch(review.projectId, {
+      currentStage: "GeneratingSpecification",
+      attempts: 0,
     });
   },
 });

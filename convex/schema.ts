@@ -40,6 +40,9 @@ export const artifactTypeValidator = v.union(
   v.literal("brief"),
   v.literal("questions"),
   v.literal("answers"),
+  v.literal("businessRequirements"),
+  v.literal("wixCapabilitySnapshot"),
+  v.literal("wixSolutionArchitecture"),
   v.literal("specification"),
   v.literal("design"),
   v.literal("buildReport"),
@@ -85,6 +88,10 @@ export default defineSchema({
     leaseExpiresAt: v.optional(v.number()),
     attempts: v.number(),
     lastError: v.optional(v.string()),
+    // Incremented when the user deliberately starts planning again from the brief.
+    // Old artifacts stay append-only, but planning stages only reuse artifacts from
+    // the current cycle.
+    planningCycle: v.optional(v.number()),
   })
     // Leasing scans by stage, so index it. `by_stage_lease` lets the worker find
     // "runnable stage, and either unleased or the lease has expired" cheaply.
@@ -102,6 +109,7 @@ export default defineSchema({
     storageId: v.optional(v.id("_storage")), // blobs never live inside documents
     promptHash: v.string(),
     inputsHash: v.string(),
+    planningCycle: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
     .index("by_project_type", ["projectId", "type"]),
@@ -145,6 +153,7 @@ export default defineSchema({
     wixDashboardUrl: v.optional(v.string()),
     blocking: v.boolean(),
     completed: v.boolean(),
+    configurationValue: v.optional(v.string()),
     completedAt: v.optional(v.number()),
   }).index("by_project", ["projectId"]),
 

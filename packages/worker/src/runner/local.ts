@@ -32,7 +32,7 @@ export class LocalRunner implements JobRunner {
 
     const prefix = `[worker ${this.workerId}] [project ${project.id}] [${project.currentStage}]`;
     const attempt = project.attempts + 1;
-    console.log(`${prefix} leased — attempt ${attempt}`);
+    console.error(`${prefix} leased — attempt ${attempt}`);
     await this.store.appendLog({
       projectId: project.id,
       stage: project.currentStage,
@@ -51,6 +51,7 @@ export class LocalRunner implements JobRunner {
       await this.store.commitResult(project.id, this.workerId, {
         kind: "failed",
         error,
+        retryable: false,
       });
       return true;
     }
@@ -61,7 +62,7 @@ export class LocalRunner implements JobRunner {
       () => {
         void this.store
           .renewLease(project.id, this.workerId)
-          .then(() => console.log(`${prefix} lease renewed`))
+          .then(() => console.error(`${prefix} lease renewed`))
           .catch((error) => console.error(`${prefix} lease renewal failed`, error));
       },
       (this.leaseTtlSeconds * 1000) / 3,
@@ -76,9 +77,10 @@ export class LocalRunner implements JobRunner {
         mode: project.settings.mode,
         settings: project.settings,
         attempts: project.attempts,
+        planningCycle: project.planningCycle ?? 1,
         store: this.store,
         log: async (message, data) => {
-          console.log(`${prefix} ${message}`);
+          console.error(`${prefix} ${message}`);
           await this.store.appendLog({
             projectId: project.id,
             stage: project.currentStage,
@@ -87,8 +89,19 @@ export class LocalRunner implements JobRunner {
             data,
           });
         },
+        progress: async (percent, label) => {
+          const boundedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+          console.error(`${prefix} ${label} — ${boundedPercent}%`);
+          await this.store.appendLog({
+            projectId: project.id,
+            stage: project.currentStage,
+            level: "info",
+            message: label,
+            data: { kind: "stage-progress", label, percent: boundedPercent },
+          });
+        },
         emitArtifact: async (type, data, provenance) => {
-          console.log(`${prefix} storing ${type}`);
+          console.error(`${prefix} storing ${type}`);
           await this.store.appendArtifact({
             projectId: project.id,
             type,
@@ -97,12 +110,15 @@ export class LocalRunner implements JobRunner {
             // prompt it used and which inputs it resolved. The runner just records it.
             promptHash: provenance.promptHash,
             inputsHash: provenance.inputsHash,
+            planningCycle: project.planningCycle ?? 1,
           });
-          console.log(`${prefix} stored ${type}`);
+          console.error(`${prefix} stored ${type}`);
         },
       };
 
       const result = await handler.run(ctx);
+
+      if (result.kind !== "failed") await ctx.progress(100, "Done");
 
       if (result.kind === "advance") {
         // The handler does not decide what comes next — the machine does, from the
@@ -113,20 +129,20 @@ export class LocalRunner implements JobRunner {
           kind: "advance",
           next,
         });
-        console.log(`${prefix} completed → ${next}`);
+        console.error(`${prefix} completed → ${next}`);
       } else if (result.kind === "route") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "advance",
           next: result.next,
         });
-        console.log(`${prefix} routed → ${result.next}`);
+        console.error(`${prefix} routed → ${result.next}`);
       } else if (result.kind === "questions") {
         const next = result.hasQuestions ? "WaitingForAnswers" : "GeneratingSpecification";
         await this.store.commitResult(project.id, this.workerId, {
           kind: "advance",
           next,
         });
-        console.log(`${prefix} completed → ${next}`);
+        console.error(`${prefix} completed → ${next}`);
       } else if (result.kind === "wixProvisioned") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "wixProvisioned",
@@ -134,7 +150,7 @@ export class LocalRunner implements JobRunner {
           wix: result.wix,
           github: result.github,
         });
-        console.log(`${prefix} completed → GeneratingCode`);
+        console.error(`${prefix} completed → GeneratingCode`);
       } else if (result.kind === "codeGenerated") {
         const next = nextStage(project.currentStage, project.settings.mode);
         await this.store.commitResult(project.id, this.workerId, {
@@ -142,20 +158,23 @@ export class LocalRunner implements JobRunner {
           next,
           github: result.github,
         });
-        console.log(`${prefix} completed → ${next}`);
+        console.error(`${prefix} completed → ${next}`);
       } else if (result.kind === "manualTasks") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "manualTasks",
           tasks: result.tasks,
         });
-        console.log(`${prefix} completed → WaitingForManualActions (${result.tasks.length} tasks)`);
+        console.error(
+          `${prefix} completed → WaitingForManualActions (${result.tasks.length} tasks)`,
+        );
       } else {
         console.error(`${prefix} failed — ${result.error}`);
         await this.store.commitResult(project.id, this.workerId, {
           kind: "failed",
           error: result.error,
+          retryable: result.retryable,
         });
-        console.log(`${prefix} failure recorded; stage is ready to retry`);
+        console.error(`${prefix} failure recorded; stage is ready to retry`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -168,8 +187,9 @@ export class LocalRunner implements JobRunner {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "failed",
           error: message,
+          retryable: project.currentStage !== "GeneratingCode",
         });
-        console.log(`${prefix} failure recorded; stage is ready to retry`);
+        console.error(`${prefix} failure recorded; stage is ready to retry`);
       } catch (commitError) {
         console.error(
           `${prefix} could not record failure; lease must expire before retry`,

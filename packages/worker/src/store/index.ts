@@ -41,6 +41,7 @@ export interface LeasedProject {
     siteTemplate?: string;
   };
   attempts: number;
+  planningCycle?: number;
 }
 
 export interface ArtifactRecord {
@@ -48,6 +49,7 @@ export interface ArtifactRecord {
   type: ArtifactType;
   version: number;
   data: unknown;
+  planningCycle?: number;
 }
 
 /** What `commitResult` records. `advance` carries the stage the worker computed. */
@@ -61,7 +63,7 @@ export type CommittedResult =
     }
   | { kind: "codeGenerated"; next: Stage; github: GitHubProject }
   | { kind: "manualTasks"; tasks: unknown[] }
-  | { kind: "failed"; error: string };
+  | { kind: "failed"; error: string; retryable: boolean };
 
 export interface ProjectStore {
   // ── the queue ──────────────────────────────────────────────────────────────
@@ -95,6 +97,7 @@ export interface ProjectStore {
     data: unknown;
     promptHash: string;
     inputsHash: string;
+    planningCycle?: number;
   }): Promise<ArtifactRecord>;
   getLatestApproved(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
   getLatestArtifact(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
@@ -103,6 +106,8 @@ export interface ProjectStore {
     projectId: ProjectId,
     type: ArtifactType,
   ): Promise<{ feedback: ReviewFeedback[]; artifact: ArtifactRecord } | null>;
+  /** Mark the latest feedback as applied so a later lifecycle pass cannot replay it. */
+  consumeLatestReviewFeedback(projectId: ProjectId, type: ArtifactType): Promise<void>;
 
   // ── design progress (live per-screen state the dashboard renders directly) ──
   /** Begin (or redo, after a crash) a design run: replace all rows with the plan. */
@@ -126,6 +131,9 @@ export interface ProjectStore {
 
   // ── manual tasks ───────────────────────────────────────────────────────────
   hasBlockingIncompleteTasks(projectId: ProjectId): Promise<boolean>;
+  getManualTaskStatuses(
+    projectId: ProjectId,
+  ): Promise<Array<{ title: string; completed: boolean; configurationValue?: string }>>;
 
   // ── change requests (the collaboration queue) ──────────────────────────────
   nextQueuedChangeRequest(

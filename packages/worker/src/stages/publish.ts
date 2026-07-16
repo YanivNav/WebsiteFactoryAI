@@ -18,7 +18,7 @@ export const publish: StageHandler = {
   stage: "Publishing",
 
   async run(ctx) {
-    await ctx.log("Publishing your site");
+    await ctx.progress(10, "Preparing your site for publishing");
     await fakeWork();
 
     // TODO(phase-5): WixManagedPublisher.release() → live URL
@@ -28,7 +28,7 @@ export const publish: StageHandler = {
       FAKE_PROVENANCE,
     );
 
-    await ctx.log("Your site is live");
+    await ctx.progress(90, "Finishing publication");
     return { kind: "advance" };
   },
 };

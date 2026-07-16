@@ -10,6 +10,9 @@ export const ARTIFACT_TYPES = [
   "brief",
   "questions",
   "answers",
+  "businessRequirements",
+  "wixCapabilitySnapshot",
+  "wixSolutionArchitecture",
   "specification",
   "design",
   "buildReport",
@@ -55,7 +58,11 @@ export function normalizeReviewFeedback(stored: unknown[]): ReviewFeedback[] {
     if (structured.success) return [structured.data];
     if (typeof item !== "string") return [];
     try {
-      const legacy = JSON.parse(item) as { screenId?: string; pageTitle?: string; comment?: string };
+      const legacy = JSON.parse(item) as {
+        screenId?: string;
+        pageTitle?: string;
+        comment?: string;
+      };
       if (legacy.screenId && legacy.pageTitle && legacy.comment) {
         return [
           {
@@ -96,11 +103,38 @@ export type ChangeRequestStatus = (typeof CHANGE_REQUEST_STATUSES)[number];
 export type PublishTarget = "wix-managed" | "custom";
 
 export const ClarifyingQuestionSet = z.object({
+  round: z.number().int().min(1).describe("One-based adaptive interview round"),
+  phase: z
+    .enum(["business", "workflows", "architecture"])
+    .describe("The kind of uncertainty this round resolves"),
+  contextSummary: z
+    .string()
+    .describe("One concise sentence explaining what is understood and what this round focuses on"),
+  readyForPlanning: z
+    .boolean()
+    .describe("True only when no material business or visitor-workflow ambiguity remains"),
   questions: z
     .array(
       z.object({
         id: z.string().describe("Stable short identifier, lowercase snake_case"),
+        category: z
+          .enum([
+            "business",
+            "audience",
+            "content",
+            "commerce",
+            "scheduling",
+            "workflows",
+            "communications",
+            "accounts",
+            "operations",
+            "launch",
+          ])
+          .describe("Planning area affected by the answer"),
         prompt: z.string().describe("One concise question phrased in Wix vocabulary"),
+        rationale: z
+          .string()
+          .describe("Short plain-language explanation of what site decision this answer affects"),
         options: z
           .array(
             z.object({
@@ -113,7 +147,7 @@ export const ClarifyingQuestionSet = z.object({
         allowCustom: z.boolean().describe("Whether a free-text answer is genuinely useful"),
       }),
     )
-    .max(5),
+    .max(12),
 });
 
 export const ClarifyingAnswerSet = z.object({
@@ -123,6 +157,110 @@ export const ClarifyingAnswerSet = z.object({
 export type QuestionSet = z.infer<typeof ClarifyingQuestionSet>;
 export type ClarifyingQuestion = QuestionSet["questions"][number];
 export type AnswerSet = z.infer<typeof ClarifyingAnswerSet>;
+
+export const BusinessRequirements = z.object({
+  summary: z.string().describe("Concise description of the business and the website's job"),
+  audiences: z.array(
+    z.object({
+      name: z.string(),
+      needs: z.array(z.string()),
+    }),
+  ),
+  goals: z.array(z.string()).describe("Prioritized business outcomes for the website"),
+  contentResponsibilities: z.array(
+    z.object({
+      content: z.string(),
+      owner: z.enum(["siteTeam", "visitor", "wixBusinessSolution", "generated"]),
+      updateFrequency: z.enum(["rarely", "occasionally", "frequently", "transactional"]),
+    }),
+  ),
+  journeys: z.array(
+    z.object({
+      id: z.string().describe("Stable lowercase snake_case identifier"),
+      name: z.string(),
+      actor: z.string(),
+      trigger: z.string(),
+      steps: z.array(z.string()),
+      dynamicContext: z.array(z.string()),
+      businessOutcomes: z.array(z.string()),
+      dataCaptured: z.array(z.string()),
+      ownerOperations: z.array(z.string()),
+      acceptanceCriteria: z.array(z.string()),
+    }),
+  ),
+  constraints: z.array(z.string()),
+  assumptions: z.array(z.string()),
+});
+
+export type Requirements = z.infer<typeof BusinessRequirements>;
+
+export const WixCapabilitySnapshot = z.object({
+  researchedAt: z.string(),
+  capabilities: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      status: z.enum(["available", "limited", "unavailable", "not_researched"]),
+      headlessFit: z.enum(["native", "custom_workflow", "dashboard_only", "unsuitable"]),
+      relevantJourneyIds: z.array(z.string()),
+      sdkPackages: z.array(z.string()),
+      operations: z.array(z.string()),
+      limitations: z.array(z.string()),
+      manualPrerequisites: z.array(z.string()),
+      evidence: z.array(
+        z.object({
+          url: z.string(),
+          title: z.string(),
+          retrievedAt: z.string(),
+          excerpt: z.string(),
+        }),
+      ),
+    }),
+  ),
+  unresolvedResearch: z.array(z.string()),
+});
+
+export type CapabilitySnapshot = z.infer<typeof WixCapabilitySnapshot>;
+
+export const WixSolutionArchitecture = z.object({
+  summary: z.string(),
+  businessSolutions: z.array(z.string()),
+  journeySolutions: z.array(
+    z.object({
+      journeyId: z.string(),
+      pattern: z.string(),
+      rationale: z.string(),
+      wixCapabilities: z.array(z.string()),
+      frontendResponsibilities: z.array(z.string()),
+      backendResponsibilities: z.array(z.string()),
+      dataFlow: z.array(z.string()),
+      rejectedAlternatives: z.array(
+        z.object({
+          pattern: z.string(),
+          reason: z.string(),
+        }),
+      ),
+      requiredConfiguration: z.array(
+        z.object({
+          key: z.string(),
+          description: z.string(),
+          canAutomate: z.boolean(),
+        }),
+      ),
+      acceptanceTests: z.array(z.string()),
+    }),
+  ),
+  cmsCollections: z.array(
+    z.object({
+      name: z.string(),
+      purpose: z.string(),
+      justification: z.string(),
+    }),
+  ),
+  risks: z.array(z.string()),
+});
+
+export type SolutionArchitecture = z.infer<typeof WixSolutionArchitecture>;
 
 export const DESIGN_VIEWPORTS = ["desktop", "mobile", "tablet"] as const;
 
@@ -254,6 +392,12 @@ export const ProjectSpecification = z.object({
               name: z.string(),
               type: z.enum(CMS_FIELD_TYPES),
               description: z.string().nullable().describe("Null if self-explanatory"),
+              referencedCollection: z
+                .string()
+                .nullable()
+                .describe(
+                  "Exact target collection name for reference fields; null for every other type",
+                ),
             }),
           ),
         }),
@@ -271,10 +415,87 @@ export const ProjectSpecification = z.object({
           "Appointments or classes → bookings. Do not add one 'just in case' — each is " +
           "real setup work for the owner.",
       ),
+
+    visitorWorkflows: z
+      .array(
+        z.object({
+          id: z.string().describe("Stable lowercase snake_case workflow identifier"),
+          name: z.string().describe("Short user-facing workflow name"),
+          description: z.string().describe("What the visitor accomplishes end to end"),
+          dynamicContext: z
+            .string()
+            .nullable()
+            .describe(
+              "Current page or content context used by the workflow, such as the current course; null when static",
+            ),
+          inputs: z.array(
+            z.object({
+              name: z.string(),
+              type: z.enum(["text", "email", "phone", "textarea", "select", "checkbox"]),
+              required: z.boolean(),
+              source: z.enum(["visitor", "currentPage", "siteData"]),
+              description: z.string(),
+            }),
+          ),
+          actions: z.array(
+            z.object({
+              type: z.enum([
+                "createOrUpdateContact",
+                "saveFormSubmission",
+                "sendTriggeredEmail",
+                "notifySiteTeam",
+                "createCmsItem",
+                "startCheckout",
+                "createBooking",
+              ]),
+              description: z.string().describe("The business result and data used by this action"),
+              requiresManualSetup: z
+                .boolean()
+                .describe("True only when Wix requires dashboard configuration or owner content"),
+              requiredConfiguration: z
+                .array(
+                  z.object({
+                    key: z.string().describe("Stable camelCase configuration key used by code"),
+                    description: z
+                      .string()
+                      .describe("The exact value needed and where it comes from"),
+                  }),
+                )
+                .describe(
+                  "Runtime IDs or owner-provided values needed by this action, such as a published triggered-email ID; empty when none",
+                ),
+            }),
+          ),
+          successResult: z.string().describe("What the visitor sees after the workflow succeeds"),
+        }),
+      )
+      .describe(
+        "Every visitor interaction with business effects, described as inputs, dynamic context, and ordered outcomes. " +
+          "Do not assume visible inputs imply Wix Forms: choose saveFormSubmission only when the Forms inbox/schema is itself required.",
+      ),
   }),
 });
 
 /** The shared type. Worker produces it, dashboard renders it, the model is constrained to it. */
 export type Specification = z.infer<typeof ProjectSpecification>;
+
+/** Read artifacts created before CMS reference targets were explicit. */
+export function parseProjectSpecification(value: unknown): Specification {
+  if (!value || typeof value !== "object") return ProjectSpecification.parse(value);
+  const copy = JSON.parse(JSON.stringify(value)) as {
+    infrastructure?: {
+      cmsCollections?: Array<{ fields?: Array<Record<string, unknown>> }>;
+      visitorWorkflows?: unknown[];
+    };
+  };
+  for (const collection of copy.infrastructure?.cmsCollections ?? []) {
+    for (const field of collection.fields ?? []) {
+      if (!("referencedCollection" in field)) field.referencedCollection = null;
+    }
+  }
+  copy.infrastructure ??= {};
+  copy.infrastructure.visitorWorkflows ??= [];
+  return ProjectSpecification.parse(copy);
+}
 export type WixBusinessSolution = (typeof WIX_BUSINESS_SOLUTIONS)[number];
 export type SectionType = (typeof SECTION_TYPES)[number];

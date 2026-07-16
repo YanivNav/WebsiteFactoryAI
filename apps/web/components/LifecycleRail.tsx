@@ -48,7 +48,13 @@ export function LifecycleRail({
             const nextIndex = RAIL_STEPS[index + 1]?.stageIndex ?? STAGES.length;
             const active = current >= step.stageIndex && current < nextIndex;
             const complete = current >= nextIndex || stage === "Completed";
-            const returnPhase = complete ? step.id : null;
+            // The current site-plan review is selectable too: that is where the user
+            // can choose to start planning again from the original brief.
+            const returnPhase =
+              complete ||
+              (active && step.id === "sitePlan" && stage === "WaitingForSpecificationApproval")
+                ? step.id
+                : null;
             return (
               <li key={step.label}>
                 <button
@@ -138,7 +144,8 @@ function stepStatusLabel({
   returnable: boolean;
   stage: Stage;
 }) {
-  if (active) return failed ? "Failed" : isWaitingStage(stage) ? "Awaiting your input" : "In progress";
+  if (active)
+    return failed ? "Failed" : isWaitingStage(stage) ? "Awaiting your input" : "In progress";
   if (complete) return returnable ? "Complete · click to return" : "Complete";
   return "Queued";
 }

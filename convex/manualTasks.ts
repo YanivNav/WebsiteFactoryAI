@@ -6,16 +6,23 @@
  */
 
 import { v } from "convex/values";
-import { nextStage } from "@factory/shared";
 import { mutation } from "./_generated/server";
 
 export const complete = mutation({
-  args: { taskId: v.id("manualTasks") },
-  handler: async (ctx, { taskId }) => {
+  args: { taskId: v.id("manualTasks"), configurationValue: v.optional(v.string()) },
+  handler: async (ctx, { taskId, configurationValue }) => {
     const task = await ctx.db.get(taskId);
     if (!task || task.completed) return;
 
-    await ctx.db.patch(taskId, { completed: true, completedAt: Date.now() });
+    const needsValue = /^Configure \S+ for /.test(task.title);
+    const value = configurationValue?.trim();
+    if (needsValue && !value) throw new Error("Enter the required value before marking this done");
+
+    await ctx.db.patch(taskId, {
+      completed: true,
+      configurationValue: value,
+      completedAt: Date.now(),
+    });
 
     const project = await ctx.db.get(task.projectId);
     if (!project || project.currentStage !== "WaitingForManualActions") return;
@@ -35,10 +42,10 @@ export const complete = mutation({
       message: "All required actions completed",
     });
 
-    // `WaitingForManualActions` is not in the linear flow, so we resume from the
-    // stage that parked us here — provisioning — and carry on from there.
+    // Resume the work that requested human input. Skipping to its successor would
+    // record a stage as successful even though it never ran with the new setup.
     await ctx.db.patch(task.projectId, {
-      currentStage: nextStage("ProvisioningWix", project.settings.mode),
+      currentStage: task.stage,
     });
   },
 });

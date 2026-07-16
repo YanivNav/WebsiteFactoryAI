@@ -16,7 +16,7 @@ import {
   type Stage,
 } from "@factory/shared";
 import { mutation } from "./_generated/server";
-import { stageValidator } from "./schema";
+import { artifactTypeValidator, stageValidator } from "./schema";
 import type { Doc } from "./_generated/dataModel";
 
 const designScreenProgressValidator = v.object({
@@ -79,6 +79,7 @@ export const leaseNextRunnable = mutation({
         brief: project.brief,
         settings: project.settings,
         attempts: project.attempts,
+        planningCycle: project.planningCycle ?? 1,
       };
     }
 
@@ -166,7 +167,7 @@ export const commitResult = mutation({
           }),
         ),
       }),
-      v.object({ kind: v.literal("failed"), error: v.string() }),
+      v.object({ kind: v.literal("failed"), error: v.string(), retryable: v.boolean() }),
     ),
   },
   handler: async (ctx, { projectId, workerId, result }) => {
@@ -219,7 +220,16 @@ export const commitResult = mutation({
 
     if (result.kind === "manualTasks") {
       await finishStageRun(ctx, project, "succeeded");
+      const existingTasks = await ctx.db
+        .query("manualTasks")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect();
       for (const task of result.tasks) {
+        if (
+          existingTasks.some((existing) => existing.title === task.title && !existing.completed)
+        ) {
+          continue;
+        }
         await ctx.db.insert("manualTasks", {
           projectId,
           stage: project.currentStage,
@@ -240,7 +250,7 @@ export const commitResult = mutation({
     await finishStageRun(ctx, project, "failed", result.error);
     await ctx.db.patch(projectId, {
       ...releaseLease,
-      attempts: project.attempts + 1,
+      attempts: result.retryable ? project.attempts + 1 : 3,
       lastError: result.error,
     });
   },
@@ -264,19 +274,11 @@ export const appendLog = mutation({
 export const appendArtifact = mutation({
   args: {
     projectId: v.id("projects"),
-    type: v.union(
-      v.literal("brief"),
-      v.literal("questions"),
-      v.literal("answers"),
-      v.literal("specification"),
-      v.literal("design"),
-      v.literal("buildReport"),
-      v.literal("preview"),
-      v.literal("releaseReport"),
-    ),
+    type: artifactTypeValidator,
     data: v.any(),
     promptHash: v.string(),
     inputsHash: v.string(),
+    planningCycle: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     // Append-only: the new version is always max(existing) + 1. We never overwrite.
@@ -308,16 +310,7 @@ export const appendArtifact = mutation({
 export const getLatestArtifact = mutation({
   args: {
     projectId: v.id("projects"),
-    type: v.union(
-      v.literal("brief"),
-      v.literal("questions"),
-      v.literal("answers"),
-      v.literal("specification"),
-      v.literal("design"),
-      v.literal("buildReport"),
-      v.literal("preview"),
-      v.literal("releaseReport"),
-    ),
+    type: artifactTypeValidator,
   },
   handler: async (ctx, { projectId, type }) => {
     const artifacts = await ctx.db
@@ -326,7 +319,13 @@ export const getLatestArtifact = mutation({
       .collect();
     const latest = artifacts.sort((a, b) => b.version - a.version)[0];
     return latest
-      ? { id: latest._id, type: latest.type, version: latest.version, data: latest.data }
+      ? {
+          id: latest._id,
+          type: latest.type,
+          version: latest.version,
+          data: latest.data,
+          planningCycle: latest.planningCycle,
+        }
       : null;
   },
 });
@@ -357,7 +356,13 @@ export const getLatestApproved = mutation({
     if (!approved) return null;
     const artifact = await ctx.db.get(approved.artifactId);
     return artifact
-      ? { id: artifact._id, type: artifact.type, version: artifact.version, data: artifact.data }
+      ? {
+          id: artifact._id,
+          type: artifact.type,
+          version: artifact.version,
+          data: artifact.data,
+          planningCycle: artifact.planningCycle,
+        }
       : null;
   },
 });
@@ -368,12 +373,33 @@ export const getLatestReviewFeedback = mutation({
     type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
   },
   handler: async (ctx, { projectId, type }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) return [];
+    const planningCycle = project.planningCycle ?? 1;
     const reviews = await ctx.db
       .query("reviews")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
-    const latest = reviews
-      .filter((review) => review.artifactType === type && review.status === "needs_changes")
+    const artifacts = await Promise.all(reviews.map((review) => ctx.db.get(review.artifactId)));
+    const currentReviewIds = new Set(
+      artifacts
+        .filter((artifact) => artifact && (artifact.planningCycle ?? 1) === planningCycle)
+        .map((artifact) => artifact!._id),
+    );
+    const currentReviews = reviews.filter((review) => currentReviewIds.has(review.artifactId));
+    const latestApprovedVersion = Math.max(
+      0,
+      ...currentReviews
+        .filter((review) => review.artifactType === type && review.status === "approved")
+        .map((review) => review.version),
+    );
+    const latest = currentReviews
+      .filter(
+        (review) =>
+          review.artifactType === type &&
+          review.status === "needs_changes" &&
+          review.version > latestApprovedVersion,
+      )
       .sort((a, b) => b._creationTime - a._creationTime)[0];
     return normalizeReviewFeedback(latest?.comments ?? []);
   },
@@ -385,13 +411,33 @@ export const getLatestReviewContext = mutation({
     type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
   },
   handler: async (ctx, { projectId, type }) => {
-    const review = (
-      await ctx.db
-        .query("reviews")
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .collect()
-    )
-      .filter((item) => item.artifactType === type && item.status === "needs_changes")
+    const project = await ctx.db.get(projectId);
+    if (!project) return null;
+    const planningCycle = project.planningCycle ?? 1;
+    const reviews = await ctx.db
+      .query("reviews")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    const artifacts = await Promise.all(reviews.map((review) => ctx.db.get(review.artifactId)));
+    const currentReviewIds = new Set(
+      artifacts
+        .filter((artifact) => artifact && (artifact.planningCycle ?? 1) === planningCycle)
+        .map((artifact) => artifact!._id),
+    );
+    const currentReviews = reviews.filter((review) => currentReviewIds.has(review.artifactId));
+    const latestApprovedVersion = Math.max(
+      0,
+      ...currentReviews
+        .filter((review) => review.artifactType === type && review.status === "approved")
+        .map((review) => review.version),
+    );
+    const review = currentReviews
+      .filter(
+        (item) =>
+          item.artifactType === type &&
+          item.status === "needs_changes" &&
+          item.version > latestApprovedVersion,
+      )
       .sort((a, b) => b._creationTime - a._creationTime)[0];
     if (!review) return null;
     const artifact = await ctx.db.get(review.artifactId);
@@ -403,8 +449,40 @@ export const getLatestReviewContext = mutation({
         type: artifact.type,
         version: artifact.version,
         data: artifact.data,
+        planningCycle: artifact.planningCycle,
       },
     };
+  },
+});
+
+export const consumeLatestReviewFeedback = mutation({
+  args: {
+    projectId: v.id("projects"),
+    type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
+  },
+  handler: async (ctx, { projectId, type }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) return;
+    const planningCycle = project.planningCycle ?? 1;
+    const reviews = await ctx.db
+      .query("reviews")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    const reviewsWithArtifacts = await Promise.all(
+      reviews.map(async (review) => ({ review, artifact: await ctx.db.get(review.artifactId) })),
+    );
+    const review = reviewsWithArtifacts
+      .filter(
+        ({ review, artifact }) =>
+          review.artifactType === type &&
+          review.status === "needs_changes" &&
+          artifact &&
+          (artifact.planningCycle ?? 1) === planningCycle,
+      )
+      .map(({ review }) => review)
+      .filter((item) => item.artifactType === type && item.status === "needs_changes")
+      .sort((a, b) => b._creationTime - a._creationTime)[0];
+    if (review) await ctx.db.patch(review._id, { status: "rejected" });
   },
 });
 
@@ -488,6 +566,21 @@ export const hasBlockingIncompleteTasks = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
     return tasks.some((t) => t.blocking && !t.completed);
+  },
+});
+
+export const getManualTaskStatuses = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const tasks = await ctx.db
+      .query("manualTasks")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    return tasks.map(({ title, completed, configurationValue }) => ({
+      title,
+      completed,
+      configurationValue,
+    }));
   },
 });
 

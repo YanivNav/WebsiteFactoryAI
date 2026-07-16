@@ -5,13 +5,17 @@ import { LoaderCircle, X } from "lucide-react";
 /** Confirmation before reopening an earlier phase. Nothing is deleted by returning. */
 export function ReturnToPhaseDialog({
   label,
+  alreadyInPhase = false,
   onCancel,
   onConfirm,
+  onRestartFromBrief,
   submitting,
 }: {
   label: string;
+  alreadyInPhase?: boolean;
   onCancel: () => void;
   onConfirm: () => Promise<void>;
+  onRestartFromBrief?: () => Promise<void>;
   submitting: boolean;
 }) {
   return (
@@ -28,7 +32,7 @@ export function ReturnToPhaseDialog({
               Project progression
             </p>
             <h2 className="mt-1 text-xl font-semibold tracking-[-0.025em]" id="return-phase-title">
-              Return to {label}?
+              {alreadyInPhase ? `${label} options` : `Return to ${label}?`}
             </h2>
           </div>
           <button
@@ -43,9 +47,29 @@ export function ReturnToPhaseDialog({
         </div>
         <div className="p-5">
           <p className="text-sm leading-5 text-[#596170]">
-            The latest saved {label.toLowerCase()} will reopen. Work from later phases stays in the
-            project, so nothing is deleted.
+            {alreadyInPhase
+              ? `You’re viewing the latest saved ${label.toLowerCase()}.`
+              : `The latest saved ${label.toLowerCase()} will reopen. Work from later phases stays in the project, so nothing is deleted.`}
           </p>
+          {onRestartFromBrief && (
+            <div className="mt-4 rounded-md border border-[#c9d8f5] bg-[#f4f7ff] p-4">
+              <p className="text-sm font-semibold text-[#202124]">Need a completely new plan?</p>
+              <p className="mt-1 text-xs leading-5 text-[#596170]">
+                Start again from the original brief. We’ll ask fresh questions and generate a new
+                site plan without reusing the current plan or its answers. Saved versions stay in
+                the project history.
+              </p>
+              <button
+                className="border-primary text-primary mt-3 inline-flex min-h-9 items-center gap-2 rounded border bg-white px-4 text-xs font-semibold hover:bg-[#edf3ff] disabled:opacity-50"
+                disabled={submitting}
+                onClick={() => void onRestartFromBrief()}
+                type="button"
+              >
+                {submitting && <LoaderCircle className="animate-spin" size={14} />}
+                Start again from brief
+              </button>
+            </div>
+          )}
           <div className="mt-6 flex justify-end gap-2">
             <button
               className="border-outline min-h-10 rounded border bg-white px-5 text-xs font-semibold hover:bg-[#f1f2f4] disabled:opacity-50"
@@ -53,17 +77,19 @@ export function ReturnToPhaseDialog({
               onClick={onCancel}
               type="button"
             >
-              Keep current phase
+              {alreadyInPhase ? "Close" : "Keep current phase"}
             </button>
-            <button
-              className="bg-primary inline-flex min-h-10 items-center gap-2 rounded px-5 text-xs font-semibold text-white hover:bg-[#064aa0] disabled:opacity-50"
-              disabled={submitting}
-              onClick={() => void onConfirm()}
-              type="button"
-            >
-              {submitting && <LoaderCircle className="animate-spin" size={14} />}
-              Return to {label}
-            </button>
+            {!alreadyInPhase && (
+              <button
+                className="bg-primary inline-flex min-h-10 items-center gap-2 rounded px-5 text-xs font-semibold text-white hover:bg-[#064aa0] disabled:opacity-50"
+                disabled={submitting}
+                onClick={() => void onConfirm()}
+                type="button"
+              >
+                {submitting && <LoaderCircle className="animate-spin" size={14} />}
+                Return to {label}
+              </button>
+            )}
           </div>
         </div>
       </section>

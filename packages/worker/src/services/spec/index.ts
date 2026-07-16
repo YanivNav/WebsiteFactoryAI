@@ -12,7 +12,14 @@
  */
 
 import { generateText, Output } from "ai";
-import { ProjectSpecification, type AnswerSet, type Specification } from "@factory/shared";
+import {
+  ProjectSpecification,
+  type AnswerSet,
+  type CapabilitySnapshot,
+  type Requirements,
+  type SolutionArchitecture,
+  type Specification,
+} from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
 import { resolveModel } from "../llm";
 
@@ -29,7 +36,11 @@ export interface SpecInput {
   brief: string;
   answers: AnswerSet["answers"];
   designFeedback: string[];
+  specificationFeedback: string[];
   previousSpecification?: Specification;
+  businessRequirements: Requirements;
+  wixCapabilities: CapabilitySnapshot;
+  wixArchitecture: SolutionArchitecture;
 }
 
 export interface SpecResult {
@@ -64,9 +75,15 @@ export class LlmSpecGenerator implements SpecGenerator {
         input.previousSpecification
           ? `Current approved site plan:\n${JSON.stringify(input.previousSpecification, null, 2)}`
           : "Current approved site plan: none.",
+        `Business requirements (implementation-neutral):\n${JSON.stringify(input.businessRequirements, null, 2)}`,
+        `Current Wix capability evidence:\n${JSON.stringify(input.wixCapabilities, null, 2)}`,
+        `Wix solution architecture:\n${JSON.stringify(input.wixArchitecture, null, 2)}`,
         input.designFeedback.length > 0
           ? `Feedback from visual design review:\n${input.designFeedback.map((item) => `- ${item}`).join("\n")}\nUpdate the site structure only where the feedback requires it. Add or remove pages and sections when necessary; preserve unrelated decisions.`
           : "Feedback from visual design review: none.",
+        input.specificationFeedback.length > 0
+          ? `Feedback from site plan review:\n${input.specificationFeedback.map((item) => `- ${item}`).join("\n")}\nApply this feedback while preserving unrelated approved decisions.`
+          : "Feedback from site plan review: none.",
       ].join("\n\n"),
     });
 
