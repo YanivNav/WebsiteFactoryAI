@@ -8,10 +8,23 @@
  */
 
 import { v } from "convex/values";
-import { isRunnableStage, nextStage, STAGES, type Stage } from "@factory/shared";
+import {
+  isRunnableStage,
+  nextStage,
+  normalizeReviewFeedback,
+  STAGES,
+  type Stage,
+} from "@factory/shared";
 import { mutation } from "./_generated/server";
 import { stageValidator } from "./schema";
 import type { Doc } from "./_generated/dataModel";
+
+const designScreenProgressValidator = v.object({
+  pageTitle: v.string(),
+  pagePath: v.string(),
+  status: v.union(v.literal("queued"), v.literal("generating"), v.literal("ready")),
+  screenshotStorageId: v.optional(v.id("_storage")),
+});
 
 const RUNNABLE_STAGES = STAGES.filter(isRunnableStage);
 
@@ -41,9 +54,7 @@ export const leaseNextRunnable = mutation({
         (p) =>
           p.status === "active" &&
           p.attempts < 3 &&
-          (p.leaseWorkerId === undefined ||
-            p.leaseWorkerId === workerId ||
-            (p.leaseExpiresAt ?? 0) < now), // stale lease or restarted local worker → reclaim
+          (p.leaseWorkerId === undefined || (p.leaseExpiresAt ?? 0) < now), // stale lease or restarted local worker → reclaim
       );
 
       if (!project) continue;
@@ -351,7 +362,7 @@ export const getLatestApproved = mutation({
   },
 });
 
-export const getLatestReviewComments = mutation({
+export const getLatestReviewFeedback = mutation({
   args: {
     projectId: v.id("projects"),
     type: v.union(v.literal("specification"), v.literal("design"), v.literal("preview")),
@@ -361,11 +372,10 @@ export const getLatestReviewComments = mutation({
       .query("reviews")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
-    return (
-      reviews
-        .filter((review) => review.artifactType === type && review.status === "needs_changes")
-        .sort((a, b) => b._creationTime - a._creationTime)[0]?.comments ?? []
-    );
+    const latest = reviews
+      .filter((review) => review.artifactType === type && review.status === "needs_changes")
+      .sort((a, b) => b._creationTime - a._creationTime)[0];
+    return normalizeReviewFeedback(latest?.comments ?? []);
   },
 });
 
@@ -387,7 +397,7 @@ export const getLatestReviewContext = mutation({
     const artifact = await ctx.db.get(review.artifactId);
     if (!artifact) return null;
     return {
-      comments: review.comments,
+      feedback: normalizeReviewFeedback(review.comments),
       artifact: {
         id: artifact._id,
         type: artifact.type,
@@ -398,10 +408,57 @@ export const getLatestReviewContext = mutation({
   },
 });
 
+/**
+ * Begin (or redo, after a crash) a design run: replace the project's progress rows
+ * with the plan. Screens carried over from a previous design arrive already `ready`.
+ */
+export const resetDesignProgress = mutation({
+  args: {
+    projectId: v.id("projects"),
+    screens: v.array(designScreenProgressValidator),
+  },
+  handler: async (ctx, { projectId, screens }) => {
+    const existing = await ctx.db
+      .query("designProgress")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    for (const row of existing) await ctx.db.delete(row._id);
+    for (const [order, screen] of screens.entries()) {
+      await ctx.db.insert("designProgress", { projectId, order, ...screen });
+    }
+  },
+});
+
+/** Move one screen through queued → generating → ready. Upserts, keyed by page path. */
+export const updateDesignProgress = mutation({
+  args: {
+    projectId: v.id("projects"),
+    screen: designScreenProgressValidator,
+  },
+  handler: async (ctx, { projectId, screen }) => {
+    const rows = await ctx.db
+      .query("designProgress")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    const existing = rows.find((row) => row.pagePath === screen.pagePath);
+    if (existing) {
+      await ctx.db.patch(existing._id, screen);
+    } else {
+      await ctx.db.insert("designProgress", { projectId, order: rows.length, ...screen });
+    }
+  },
+});
+
 /** Claim the next queued change request — how a Completed project comes back to life. */
 export const claimChangeRequest = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, { projectId }) => {
+    const running = await ctx.db
+      .query("changeRequests")
+      .withIndex("by_project_status", (q) => q.eq("projectId", projectId).eq("status", "running"))
+      .first();
+    if (running) return { id: running._id, description: running.description };
+
     const next = await ctx.db
       .query("changeRequests")
       .withIndex("by_project_status", (q) => q.eq("projectId", projectId).eq("status", "queued"))

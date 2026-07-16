@@ -35,21 +35,11 @@ export const generateSpecification: StageHandler = {
     // bit of context" is exactly how determinism dies.
     const answerArtifact = await ctx.store.getLatestArtifact(ctx.projectId, "answers");
     const answers = answerArtifact ? ClarifyingAnswerSet.parse(answerArtifact.data).answers : [];
-    const designFeedback = (await ctx.store.getLatestReviewComments(ctx.projectId, "design")).map(
-      (item) => {
-        try {
-          const parsed = JSON.parse(item) as {
-            kind?: string;
-            pageTitle?: string;
-            comment?: string;
-          };
-          return parsed.kind === "screen-feedback" && parsed.comment
-            ? `Feedback given while viewing ${parsed.pageTitle ?? "a design screen"}: ${parsed.comment}`
-            : item;
-        } catch {
-          return item;
-        }
-      },
+    const designFeedback = (await ctx.store.getLatestReviewFeedback(ctx.projectId, "design")).map(
+      (item) =>
+        item.screen
+          ? `Feedback given while viewing ${item.screen.pageTitle}: ${item.comment}`
+          : item.comment,
     );
     const previousSpecificationArtifact = await ctx.store.getLatestApproved(
       ctx.projectId,

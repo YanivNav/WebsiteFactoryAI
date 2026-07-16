@@ -1,4 +1,4 @@
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import z from "zod";
 import { loadPrompt } from "../../lib/prompts.js";
 import { resolveModel } from "../llm";
@@ -44,9 +44,9 @@ const Decision = z.object({
 export class LlmScreenFeedbackClassifier implements ScreenFeedbackClassifier {
   async classify(input: ScreenFeedbackInput): Promise<ScreenFeedbackDecision> {
     const prompt = loadPrompt("screen-change");
-    const { object } = await generateObject({
+    const { output } = await generateText({
       model: resolveModel(),
-      schema: Decision,
+      output: Output.object({ schema: Decision }),
       instructions: prompt.text,
       prompt: [
         `Screen title: ${input.pageTitle}`,
@@ -58,8 +58,8 @@ export class LlmScreenFeedbackClassifier implements ScreenFeedbackClassifier {
       ].join("\n"),
     });
     return {
-      scope: object.scope,
-      operations: object.operations,
+      scope: output.scope,
+      operations: output.operations,
       promptHash: prompt.hash,
     };
   }

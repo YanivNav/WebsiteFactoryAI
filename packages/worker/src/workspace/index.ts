@@ -39,6 +39,7 @@ export interface Workspace {
     options?: {
       cwd?: "root" | "parent";
       env?: Record<string, string>;
+      omitEnv?: string[];
       tty?: boolean;
       stdin?: string;
     },
@@ -46,11 +47,14 @@ export interface Workspace {
 
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string | Uint8Array): Promise<void>;
+  remove(path: string): Promise<void>;
   glob(pattern: string): Promise<string[]>;
 
   commit(message: string): Promise<string>;
 
   setRemote(url: string): Promise<void>;
+  /** Discard an interrupted factory attempt and restore the canonical remote head. */
+  restoreFromRemote(authorization: string): Promise<void>;
   sync(authorization: string): Promise<void>;
 
   /** Push factory commits to the private organization repository. Never force-push. */

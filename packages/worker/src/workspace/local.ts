@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -79,12 +79,14 @@ export class LocalWorkspace implements Workspace {
     options: {
       cwd?: "root" | "parent";
       env?: Record<string, string>;
+      omitEnv?: string[];
       tty?: boolean;
       stdin?: string;
     } = {},
   ): Promise<ExecResult> {
     const cwd = options.cwd === "parent" ? this.parent : this.root;
     const env = { ...process.env, ...options.env } as Record<string, string>;
+    for (const name of options.omitEnv ?? []) delete env[name];
     if (options.tty) {
       await preparePtyHelper();
       return await new Promise((resolve, reject) => {
@@ -136,6 +138,12 @@ export class LocalWorkspace implements Workspace {
     const destination = this.resolve(filePath);
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, content);
+  }
+
+  async remove(filePath: string): Promise<void> {
+    const destination = this.resolve(filePath);
+    if (destination === this.root) throw new Error("Refusing to remove the workspace root");
+    await rm(destination, { recursive: true, force: true });
   }
 
   async glob(pattern: string): Promise<string[]> {
@@ -193,6 +201,23 @@ export class LocalWorkspace implements Workspace {
     const merge = await this.exec("git", ["merge", "--ff-only", "origin/main"]);
     if (merge.exitCode !== 0) {
       throw new Error("The GitHub project changed and could not be fast-forwarded safely");
+    }
+  }
+
+  async restoreFromRemote(authorization: string): Promise<void> {
+    const fetch = await this.exec("git", ["fetch", "origin", "main"], {
+      env: this.gitAuthEnv(authorization),
+    });
+    if (fetch.exitCode !== 0) {
+      throw new Error(fetch.stderr || "Could not restore the GitHub project");
+    }
+    const reset = await this.exec("git", ["reset", "--hard", "origin/main"]);
+    if (reset.exitCode !== 0) {
+      throw new Error(reset.stderr || "Could not reset the interrupted project attempt");
+    }
+    const clean = await this.exec("git", ["clean", "-fd"]);
+    if (clean.exitCode !== 0) {
+      throw new Error(clean.stderr || "Could not clean the interrupted project attempt");
     }
   }
 

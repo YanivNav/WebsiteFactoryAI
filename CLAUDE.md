@@ -47,10 +47,12 @@ layer alive for that — just don't design for it now.)_
 - **Artifacts are append-only.** Never overwrite. A rejected specification produces
   `v2`; it does not mutate `v1`.
 
-- **Convex holds the truth; the repository is derived state.** A lost workspace is a
-  lost _cache_ — regenerate it from the approved specification and design.
+- **Convex holds the project inputs; GitHub holds the code truth.** A lost local workspace
+  is a lost _cache_ — clone the private organization repository, then resume from the
+  approved specification and design. Human code edits may exist only in GitHub and must
+  never be overwritten by regeneration.
 
-- **Never mix service logic.** Wix logic does not go in Claude files. Prompts do not
+- **Never mix service logic.** Wix logic does not go in Codex files. Prompts do not
   go in `services/wix/`. Each service sits behind its own interface
   (`SpecGenerator`, `DesignGenerator`, `CodeGenerator`, `Publisher`) so any of them
   can be swapped without touching anything else.
@@ -58,11 +60,15 @@ layer alive for that — just don't design for it now.)_
 - **Prompts are files, never string literals.** `packages/prompts/*.md`. They are
   inputs, so they get hashed.
 
+- **Do not introduce deprecated APIs.** Check the installed version's current official
+  documentation before adding or upgrading an SDK integration, and migrate existing
+  deprecated calls when encountered.
+
 - **Only `Workspace` touches the filesystem.** No stage handler may import `fs` or
   spawn a process directly. This is what keeps "laptop" and "container" the same code.
 
-- **Claude is never told "build my website".** It gets the specification, the design,
-  the repository, `CLAUDE.md`, and _one scoped task_.
+- **Codex is never told "build my website".** It gets the specification, the design,
+  the repository, `AGENTS.md`, and _one scoped task_.
 
 ## Consequences of who the user is
 
@@ -104,11 +110,20 @@ these or you will hit them.
 - **Never hot-write the `projects` document.** Convex uses optimistic concurrency:
   frequent writes to the same doc from the worker _while_ the dashboard also writes
   produce OCC retries and, under load, failures. So:
-  - progress and log output → **`logs`, as separate append-only documents** (no
-    contention, no shared row to fight over);
+  - log output → **`logs`, as separate append-only documents** (no contention, no
+    shared row to fight over);
+  - live progress the UI renders → **its own table, one small document per unit of
+    work** (`designProgress` is the pattern: one row per screen, patched through
+    queued → generating → ready). Same OCC properties as `logs`, but it is *state*;
   - the `projects` doc is written **only on a real stage transition**.
-  - If you ever want a progress bar, derive it from `logs`. Do not tick a counter on
-    `projects`.
+
+- **Logs are narration, never state.** No reader may branch on a log's message or
+  `data` to reconstruct what the pipeline is doing — that was tried, it produced
+  regex-parsing of human-readable messages in the UI, and it is banned. If the
+  dashboard needs to know something, give it a table (see `designProgress`) or a
+  field. The same goes for stuffing JSON into string fields: structured data gets a
+  typed shape (`ReviewFeedback` in `@factory/shared`), never `JSON.stringify` into a
+  `string[]`.
 
 - **Blobs never go inside documents.** Stitch HTML, screenshots, raw build output →
   Convex file storage, keep the `storageId`. Documents hold references, not payloads.
@@ -140,13 +155,24 @@ The blast radius of a migration, if these hold: implement `ProjectStore` against
 Postgres, rewrite the dashboard's data hooks. The state machine, the stage handlers,
 and the services never notice.
 
-## Collaboration is a queue, not git
+## Collaboration uses both the queue and GitHub
 
-Two people on two computers both submit change requests through the app. The
-worker's lease serializes them against one canonical workspace, so **there is only
-ever one writer and merge conflicts are structurally impossible.** Do not introduce
-branching, pushing, or AI conflict resolution — it would solve a problem we have
-deliberately arranged not to have. GitHub returns in V2 only as "Export my code".
+In-app change requests remain a serialized queue: the worker lease guarantees only one
+factory writer per project. In Phase 5 every project also gets a private repository in
+the configured GitHub organization so its exact code is backed up and developers can
+work from multiple computers.
+
+The factory owns direct writes to the default branch. Human development uses branches
+and pull requests. Before filesystem stages, the worker fetches and fast-forwards; after
+successful factory commits it pushes without force. A remote race causes a clean sync
+and deterministic rerun, never a force-push or invented merge resolution.
+
+After launch, the factory remains the operational control plane even when editing happens
+elsewhere. Codex, Claude, or a human may work on a branch, but the factory owns checks,
+preview, visual approval, merge, and Wix release so the user never needs Git or Wix CLI.
+In-app requests route to the earliest necessary stage: content/code changes can go directly
+to implementation, while new pages and changed flows return through specification and
+Stitch design before coding.
 
 ## Layout
 
@@ -160,7 +186,7 @@ packages/worker/   the only thing with a filesystem
   store/           ProjectStore (ConvexStore    → PostgresStore)       — where state lives
   stages/          one handler per runnable stage
   lib/             hash.ts (provenance), prompts.ts (load + hash prompt files)
-  services/        llm/ spec/ stitch/ claude/ wix/  ← never mixed
+  services/        llm/ spec/ stitch/ Codex/ wix/  ← never mixed
                    llm/ resolves LLM_MODEL ("provider:model-id") via the AI SDK, so
                    swapping model is config. The service interfaces (SpecGenerator,
                    DesignGenerator, …) swap the STRATEGY; LLM_MODEL swaps the MODEL.

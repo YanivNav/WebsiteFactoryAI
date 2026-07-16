@@ -115,11 +115,32 @@ default branch should be protected against; otherwise no application-level lease
 Wix deployment still runs from the worker's checked-out repository, so GitHub does not replace Wix
 hosting. It makes the exact source durable, reviewable, and portable across computers.
 
-### "Make changes later" is a stage, not a feature
+### After launch: the factory is the control plane, not necessarily the editor
 
-A `ChangeRequest` ("make the hero blue, add a contact form", in plain English) puts a **Completed** project back into `GeneratingCode`, then flows through checks → preview → approval → publish → Completed.
+A `ChangeRequest` ("make the hero blue, add a contact form", in plain English) puts a
+**Completed** project back into the appropriate planning, design, or code stage, then rejoins the
+same checks → preview → approval → publish flow. `Completed` is a resting state, not a terminal one.
 
-This reuses the entire machine — worker, artifacts, versions, reviews, logs, publish. **`Completed` is a resting state, not a terminal one.** After launch, this becomes the _primary_ interface: the project is a living site the user edits by asking.
+The factory always owns the operational lifecycle: synchronize the canonical repository, run
+checks, create previews, present visual review, commit and push, and release to Wix. The user never
+has to operate Git or Wix CLI commands.
+
+The creative editing surface is replaceable. A change may originate from:
+
+- a focused request in this app;
+- a richer in-app agent conversation with attachments and research tools;
+- an external coding agent such as Codex or Claude working against a branch in GitHub; or
+- a purpose-built content/CMS editor for routine content and media changes.
+
+Do not rebuild a full coding-agent chat product merely to keep all work inside this UI. For V1,
+keep the in-app request focused and let the worker remain the reliable control plane. Later, external
+agent work can arrive as a branch or pull request; the factory detects it and takes over checks,
+preview, approval, merge, and release without exposing repository operations to the user.
+
+Requests that affect information architecture are routed back through specification and design.
+For example, adding a new page or substantially changing a flow regenerates the relevant Stitch
+screens first, pauses for visual approval, and only then gives the approved screen artifacts to the
+code agent. Content-only and implementation-only requests skip unnecessary design work.
 
 ### Code engine
 
@@ -447,7 +468,15 @@ _This subsumes Phase 2's guided intake wizard — build one, not both._
 
 ### Phase 6 — Change requests + hardening
 
-The plain-English "make changes" interface (`Completed → ChangeRequest → GeneratingCode`), with the serialized queue enabling multi-user collaboration. Retry/backoff, dead-letter on repeated failure, cost/token telemetry per stage.
+- Classify each request as content-only, implementation, design, or site-plan work and enter at the
+  earliest stage actually required.
+- Support attachments on in-app requests. Keep the first interface focused rather than attempting a
+  full Codex/Claude clone in V1.
+- Treat external agent branches and pull requests as another change source; automatically run
+  checks and previews, then expose visual approval and release in the factory.
+- Add dedicated CMS/media operations for routine content work where editing code would be the wrong
+  abstraction.
+- Add retry/backoff, dead-letter handling, and cost/token telemetry per stage.
 
 ---
 
@@ -478,13 +507,15 @@ A user can:
 9. Review the generated preview.
 10. Complete any required manual Wix tasks.
 11. Publish the finished website.
-12. Ask for changes in plain English, and have them applied.
+12. Ask for changes in plain English, and have them planned, designed when necessary, applied,
+    previewed, and released without using Git or Wix CLI commands.
 
 ---
 
 ## Explicitly deferred to V2
 
 Trigger.dev execution layer (`JobRunner` swap) · auth / multi-tenancy · `custom` publish target ·
-alternative generators (Gemini / Claude / Cursor) · plugin system.
+full in-app agent chat with web research · external-agent pull-request ingestion · alternative
+generators (Gemini / Claude / Cursor) · plugin system.
 
 Each is already an interface in V1. None require touching business logic.

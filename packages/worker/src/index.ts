@@ -13,6 +13,7 @@
  * never in memory, and an abandoned lease simply goes stale and gets reclaimed.
  */
 
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
@@ -32,6 +33,7 @@ config({ path: [path.join(repoRoot, ".env.local"), path.join(repoRoot, ".env")] 
 
 const CONVEX_URL = process.env.CONVEX_URL ?? process.env.NEXT_PUBLIC_CONVEX_URL;
 const WORKER_ID = process.env.WORKER_ID ?? "local-dev";
+const WORKER_INSTANCE_ID = `${WORKER_ID}:${randomUUID()}`;
 const LEASE_TTL_SECONDS = Number(process.env.LEASE_TTL_SECONDS ?? 300);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 2000);
 
@@ -44,12 +46,12 @@ let running = true;
 
 async function main(): Promise<void> {
   const store = new ConvexProjectStore(CONVEX_URL!, LEASE_TTL_SECONDS);
-  const runner = new LocalRunner(store, WORKER_ID, LEASE_TTL_SECONDS);
+  const runner = new LocalRunner(store, WORKER_INSTANCE_ID, LEASE_TTL_SECONDS);
 
-  console.log(`[worker ${WORKER_ID}] started — polling ${CONVEX_URL}`);
+  console.log(`[worker ${WORKER_INSTANCE_ID}] started — polling ${CONVEX_URL}`);
 
   const shutdown = (signal: string) => {
-    console.log(`[worker ${WORKER_ID}] ${signal} — shutting down`);
+    console.log(`[worker ${WORKER_INSTANCE_ID}] ${signal} — shutting down`);
     running = false;
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
     } catch (error) {
       // A crash here must never lose work. The lease expires and the next tick — or
       // another worker entirely — reclaims the project exactly where it left off.
-      console.error(`[worker ${WORKER_ID}] tick failed:`, error);
+      console.error(`[worker ${WORKER_INSTANCE_ID}] tick failed:`, error);
     }
 
     // Busy → poll again straight away. Idle → back off.
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`[worker ${WORKER_ID}] stopped`);
+  console.log(`[worker ${WORKER_INSTANCE_ID}] stopped`);
 }
 
 void main();

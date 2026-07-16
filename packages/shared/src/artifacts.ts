@@ -23,6 +23,70 @@ export const REVIEW_STATUSES = ["waiting", "approved", "rejected", "needs_change
 
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
+/**
+ * One item of review feedback. Free text by default; feedback left while viewing a
+ * specific design screen carries that screen's identity, which is what lets the
+ * design stage revise exactly that screen instead of regenerating everything.
+ *
+ * This is a first-class type, NOT a convention. Feedback used to travel as
+ * JSON-encoded strings that four different files re-parsed with try/JSON.parse —
+ * that pattern is banned. If feedback needs a new field, add it here.
+ */
+export const ReviewFeedbackItem = z.object({
+  comment: z.string(),
+  screen: z.object({ screenId: z.string(), pageTitle: z.string() }).optional(),
+});
+
+export type ReviewFeedback = z.infer<typeof ReviewFeedbackItem>;
+
+/** A design revision is "targeted" when every comment points at a specific screen. */
+export function isTargetedScreenFeedback(feedback: ReviewFeedback[]): boolean {
+  return feedback.length > 0 && feedback.every((item) => item.screen !== undefined);
+}
+
+/**
+ * Upgrade legacy stored feedback (plain strings, sometimes JSON-encoded screen
+ * feedback) to the structured shape. Called ONLY at the storage boundary — nothing
+ * past it ever sees a string. Delete once no dev review predates the structured shape.
+ */
+export function normalizeReviewFeedback(stored: unknown[]): ReviewFeedback[] {
+  return stored.flatMap((item): ReviewFeedback[] => {
+    const structured = ReviewFeedbackItem.safeParse(item);
+    if (structured.success) return [structured.data];
+    if (typeof item !== "string") return [];
+    try {
+      const legacy = JSON.parse(item) as { screenId?: string; pageTitle?: string; comment?: string };
+      if (legacy.screenId && legacy.pageTitle && legacy.comment) {
+        return [
+          {
+            comment: legacy.comment,
+            screen: { screenId: legacy.screenId, pageTitle: legacy.pageTitle },
+          },
+        ];
+      }
+    } catch {
+      // Plain human text, not JSON.
+    }
+    return [{ comment: item }];
+  });
+}
+
+/**
+ * Live progress of a design run: one entry per screen, moved through
+ * queued → generating → ready by the worker. This is STATE with a schema —
+ * the dashboard renders it directly and never reconstructs progress from logs.
+ */
+export const DESIGN_SCREEN_STATUSES = ["queued", "generating", "ready"] as const;
+
+export type DesignScreenStatus = (typeof DESIGN_SCREEN_STATUSES)[number];
+
+export interface DesignScreenProgress {
+  pageTitle: string;
+  pagePath: string;
+  status: DesignScreenStatus;
+  screenshotStorageId?: string;
+}
+
 /** The collaboration queue. Serialized by the worker's lease, so merge conflicts
  *  are structurally impossible and conflict resolution never needs to exist. */
 export const CHANGE_REQUEST_STATUSES = ["queued", "running", "done", "failed"] as const;

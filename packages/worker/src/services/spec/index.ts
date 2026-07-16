@@ -11,7 +11,7 @@
  * implementing this interface. Neither touches the stage.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { ProjectSpecification, type AnswerSet, type Specification } from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
 import { resolveModel } from "../llm";
@@ -49,15 +49,12 @@ export class LlmSpecGenerator implements SpecGenerator {
     // that record identical provenance could have been given different instructions.
     const prompt = loadPrompt("spec");
 
-    // `generateObject` hands the schema to the model as a JSON schema and returns a
-    // parsed, validated, typed object. There is no JSON.parse here, and no "the model
-    // returned prose instead of JSON" failure mode — the model is structurally
-    // prevented from doing that. If it cannot satisfy the schema, this throws, and a
-    // throw is a stage failure, which is already handled: the lease releases and the
-    // stage becomes leasable again.
-    const { object } = await generateObject({
+    // `Output.object` hands the schema to the model and returns parsed, validated,
+    // typed output. If the model cannot satisfy the schema, `generateText` throws;
+    // the existing stage failure path releases the lease for a safe retry.
+    const { output } = await generateText({
       model: resolveModel(),
-      schema: ProjectSpecification,
+      output: Output.object({ schema: ProjectSpecification }),
       instructions: prompt.text, // `system` is deprecated in AI SDK v7
       prompt: [
         `Client brief:\n${input.brief}`,
@@ -73,6 +70,6 @@ export class LlmSpecGenerator implements SpecGenerator {
       ].join("\n\n"),
     });
 
-    return { specification: object, promptHash: prompt.hash };
+    return { specification: output, promptHash: prompt.hash };
   }
 }

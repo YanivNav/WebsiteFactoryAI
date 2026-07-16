@@ -154,7 +154,7 @@ export const returnToPhase = mutation({
     for (const review of waitingReviews) {
       await ctx.db.patch(review._id, {
         status: "rejected",
-        comments: [...review.comments, `Closed after returning to ${target.label}`],
+        comments: [...review.comments, { comment: `Closed after returning to ${target.label}` }],
       });
     }
 
@@ -256,7 +256,8 @@ export const detail = query({
     const project = await ctx.db.get(projectId);
     if (!project) return null;
 
-    const [artifacts, reviews, manualTasks, logs, changeRequests] = await Promise.all([
+    const [artifacts, reviews, manualTasks, logs, changeRequests, designProgress] =
+      await Promise.all([
       ctx.db
         .query("artifacts")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
@@ -278,6 +279,10 @@ export const detail = query({
         .query("changeRequests")
         .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
         .collect(),
+      ctx.db
+        .query("designProgress")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
     ]);
 
     const artifactStorageIds = artifacts.flatMap((artifact) => {
@@ -292,12 +297,7 @@ export const detail = query({
         (screen) => [screen.htmlStorageId, screen.screenshotStorageId].filter(Boolean) as string[],
       );
     });
-    const progressStorageIds = logs.flatMap((log) => {
-      const storageId = (log.data as { screenshotStorageId?: string } | undefined)
-        ?.screenshotStorageId;
-      return storageId ? [storageId] : [];
-    });
-    const storageIds = [...new Set([...artifactStorageIds, ...progressStorageIds])];
+    const storageIds = [...new Set(artifactStorageIds)];
     const assetUrls = Object.fromEntries(
       await Promise.all(
         storageIds.map(async (storageId) => [
@@ -315,6 +315,19 @@ export const detail = query({
       logs,
       changeRequests,
       assetUrls,
+      // Live per-screen design progress, ready to render — screenshot URLs resolved.
+      designProgress: await Promise.all(
+        designProgress
+          .sort((a, b) => a.order - b.order)
+          .map(async (row) => ({
+            pageTitle: row.pageTitle,
+            pagePath: row.pagePath,
+            status: row.status,
+            screenshotUrl: row.screenshotStorageId
+              ? await ctx.storage.getUrl(row.screenshotStorageId)
+              : null,
+          })),
+      ),
       // The gate the user is currently sitting at, if any.
       pendingReview: reviews.find((r) => r.status === "waiting") ?? null,
     };

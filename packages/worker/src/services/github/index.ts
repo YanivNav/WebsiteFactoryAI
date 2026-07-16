@@ -15,6 +15,7 @@ export interface GitHubService {
     projectId: string;
     projectTitle: string;
     workspace: Workspace;
+    restoreInterruptedAttempt?: boolean;
   }): Promise<GitHubRepository>;
   commitAndPush(workspace: Workspace, message: string): Promise<string>;
 }
@@ -76,10 +77,12 @@ export class GitHubRestService implements GitHubService {
     projectId,
     projectTitle,
     workspace,
+    restoreInterruptedAttempt = false,
   }: {
     projectId: string;
     projectTitle: string;
     workspace: Workspace;
+    restoreInterruptedAttempt?: boolean;
   }): Promise<GitHubRepository> {
     const { token, organization } = credentials();
     const name = repositoryName(projectTitle, projectId);
@@ -112,6 +115,7 @@ export class GitHubRestService implements GitHubService {
     }
     const authorization = gitAuthorization(token);
     await workspace.setRemote(repository.cloneUrl);
+    if (restoreInterruptedAttempt) await workspace.restoreFromRemote(authorization);
     await workspace.sync(authorization);
     await workspace.commit("chore: initialize Wix Headless project");
     await workspace.push(authorization);

@@ -34,12 +34,23 @@ export interface GeneratedDesign {
   promptHash: string;
 }
 
+/**
+ * Explicit lifecycle events, not log messages. The stage handler decides what to do
+ * with each one (persist progress, store blobs, narrate) — the service never knows
+ * about the store, and no consumer ever parses a message to find out what happened.
+ */
+export interface DesignCallbacks {
+  onProgress?: (message: string) => Promise<void>;
+  onScreenStart?: (
+    screen: { pageTitle: string; pagePath: string },
+    index: number,
+    total: number,
+  ) => Promise<void>;
+  onScreenReady?: (screen: GeneratedScreen, index: number, total: number) => Promise<void>;
+}
+
 export interface DesignGenerator {
-  generate(
-    input: DesignInput,
-    onProgress?: (message: string, data?: Record<string, unknown>) => Promise<void>,
-    onScreen?: (screen: GeneratedScreen, index: number, total: number) => Promise<void>,
-  ): Promise<GeneratedDesign>;
+  generate(input: DesignInput, callbacks?: DesignCallbacks): Promise<GeneratedDesign>;
 }
 
 async function download(url: string, fallbackContentType: string) {
@@ -69,13 +80,10 @@ function fullSizeScreenshotUrl(url: string) {
 }
 
 export class StitchDesignGenerator implements DesignGenerator {
-  async generate(
-    input: DesignInput,
-    onProgress: (message: string, data?: Record<string, unknown>) => Promise<void> = async () =>
-      undefined,
-    onScreen: (screen: GeneratedScreen, index: number, total: number) => Promise<void> = async () =>
-      undefined,
-  ): Promise<GeneratedDesign> {
+  async generate(input: DesignInput, callbacks: DesignCallbacks = {}): Promise<GeneratedDesign> {
+    const onProgress = callbacks.onProgress ?? (async () => undefined);
+    const onScreenStart = callbacks.onScreenStart ?? (async () => undefined);
+    const onScreenReady = callbacks.onScreenReady ?? (async () => undefined);
     const apiKey = process.env.STITCH_API_KEY;
     if (!apiKey) throw new Error("STITCH_API_KEY is not configured");
     const basePrompt = loadPrompt("design");
@@ -104,13 +112,12 @@ export class StitchDesignGenerator implements DesignGenerator {
           );
           if (!previousScreen)
             throw new Error(`Screen ${revision.pageTitle} is no longer available`);
-          const progressTitle = revision.targetPageTitle;
-          await onProgress(`Revising ${progressTitle}`, {
-            kind: "design-screen-generating",
-            pageTitle: progressTitle,
-            index: index + 1,
-            total: input.screenRevisions!.length,
-          });
+          await onScreenStart(
+            { pageTitle: revision.targetPageTitle, pagePath: revision.targetPagePath },
+            index,
+            input.screenRevisions!.length,
+          );
+          await onProgress(`Revising ${revision.targetPageTitle}`);
           const edited =
             revision.action === "add" || revision.action === "regenerate"
               ? await project.generate(
@@ -150,7 +157,7 @@ export class StitchDesignGenerator implements DesignGenerator {
             screenshotContentType: screenshot.contentType,
           };
           screens.push(generatedScreen);
-          await onScreen(generatedScreen, index, input.screenRevisions!.length);
+          await onScreenReady(generatedScreen, index, input.screenRevisions!.length);
         }
         return { stitchProjectId: project.id, screens, promptHash: basePrompt.hash };
       }
@@ -160,15 +167,13 @@ export class StitchDesignGenerator implements DesignGenerator {
       const screens: GeneratedScreen[] = [];
 
       for (const [index, page] of input.specification.pages.entries()) {
+        await onScreenStart(
+          { pageTitle: page.title, pagePath: page.path },
+          index,
+          input.specification.pages.length,
+        );
         await onProgress(
           `Generating desktop screen ${index + 1}/${input.specification.pages.length}: ${page.title}`,
-          {
-            kind: "design-screen-generating",
-            pageTitle: page.title,
-            pagePath: page.path,
-            index: index + 1,
-            total: input.specification.pages.length,
-          },
         );
         const generationPrompt = [
           basePrompt.text,
@@ -197,7 +202,7 @@ export class StitchDesignGenerator implements DesignGenerator {
           screenshotContentType: screenshot.contentType,
         } satisfies GeneratedScreen;
         screens.push(generatedScreen);
-        await onScreen(generatedScreen, index, input.specification.pages.length);
+        await onScreenReady(generatedScreen, index, input.specification.pages.length);
       }
 
       return { stitchProjectId: project.id, screens, promptHash: basePrompt.hash };

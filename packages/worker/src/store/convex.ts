@@ -13,7 +13,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import type { ArtifactType, Stage } from "@factory/shared";
+import type { ArtifactType, DesignScreenProgress, ReviewFeedback, Stage } from "@factory/shared";
 import type { ArtifactRecord, CommittedResult, LeasedProject, ProjectId, ProjectStore } from ".";
 
 /**
@@ -38,8 +38,10 @@ const FN = {
   getLatestApproved: mut("worker:getLatestApproved"),
   generateUploadUrl: mut("worker:generateUploadUrl"),
   getStorageUrl: mut("worker:getStorageUrl"),
-  getLatestReviewComments: mut("worker:getLatestReviewComments"),
+  getLatestReviewFeedback: mut("worker:getLatestReviewFeedback"),
   getLatestReviewContext: mut("worker:getLatestReviewContext"),
+  resetDesignProgress: mut("worker:resetDesignProgress"),
+  updateDesignProgress: mut("worker:updateDesignProgress"),
   hasBlockingIncompleteTasks: mut("worker:hasBlockingIncompleteTasks"),
   claimChangeRequest: mut("worker:claimChangeRequest"),
   completeChangeRequest: mut("worker:completeChangeRequest"),
@@ -112,21 +114,35 @@ export class ConvexProjectStore implements ProjectStore {
     })) as ArtifactRecord | null;
   }
 
-  async getLatestReviewComments(projectId: ProjectId, type: ArtifactType): Promise<string[]> {
-    return (await this.client.mutation(FN.getLatestReviewComments, {
+  async getLatestReviewFeedback(
+    projectId: ProjectId,
+    type: ArtifactType,
+  ): Promise<ReviewFeedback[]> {
+    return (await this.client.mutation(FN.getLatestReviewFeedback, {
       projectId,
       type,
-    })) as string[];
+    })) as ReviewFeedback[];
   }
 
   async getLatestReviewContext(
     projectId: ProjectId,
     type: ArtifactType,
-  ): Promise<{ comments: string[]; artifact: ArtifactRecord } | null> {
+  ): Promise<{ feedback: ReviewFeedback[]; artifact: ArtifactRecord } | null> {
     return (await this.client.mutation(FN.getLatestReviewContext, {
       projectId,
       type,
-    })) as { comments: string[]; artifact: ArtifactRecord } | null;
+    })) as { feedback: ReviewFeedback[]; artifact: ArtifactRecord } | null;
+  }
+
+  async resetDesignProgress(
+    projectId: ProjectId,
+    screens: DesignScreenProgress[],
+  ): Promise<void> {
+    await this.client.mutation(FN.resetDesignProgress, { projectId, screens });
+  }
+
+  async updateDesignProgress(projectId: ProjectId, screen: DesignScreenProgress): Promise<void> {
+    await this.client.mutation(FN.updateDesignProgress, { projectId, screen });
   }
 
   async putBlob(bytes: Uint8Array, contentType: string): Promise<string> {

@@ -10,7 +10,7 @@
  */
 
 import { v } from "convex/values";
-import { nextStage } from "@factory/shared";
+import { isTargetedScreenFeedback, nextStage, type ReviewFeedback } from "@factory/shared";
 import { mutation } from "./_generated/server";
 
 const SINGLE_USER = "owner";
@@ -51,8 +51,16 @@ export const approve = mutation({
  * `Specification v2` is the response to a rejected v1, never an edit of it.
  */
 export const requestChanges = mutation({
-  args: { reviewId: v.id("reviews"), comments: v.array(v.string()) },
-  handler: async (ctx, { reviewId, comments }) => {
+  args: {
+    reviewId: v.id("reviews"),
+    feedback: v.array(
+      v.object({
+        comment: v.string(),
+        screen: v.optional(v.object({ screenId: v.string(), pageTitle: v.string() })),
+      }),
+    ),
+  },
+  handler: async (ctx, { reviewId, feedback }) => {
     const review = await ctx.db.get(reviewId);
     if (!review) throw new Error("Review not found");
     if (review.status !== "waiting") return;
@@ -60,17 +68,10 @@ export const requestChanges = mutation({
     const project = await ctx.db.get(review.projectId);
     if (!project) throw new Error("Project not found");
 
-    await ctx.db.patch(reviewId, { status: "needs_changes", comments });
+    await ctx.db.patch(reviewId, { status: "needs_changes", comments: feedback });
 
-    const isTargetedScreenChange = comments.every((comment) => {
-      try {
-        const parsed = JSON.parse(comment) as { kind?: string };
-        return parsed.kind === "screen-feedback";
-      } catch {
-        return false;
-      }
-    });
-    if (review.artifactType === "design" && isTargetedScreenChange) {
+    const targeted = isTargetedScreenFeedback(feedback as ReviewFeedback[]);
+    if (review.artifactType === "design" && targeted) {
       const artifact = await ctx.db.get(review.artifactId);
       const screenIds = new Set(
         (
@@ -80,10 +81,9 @@ export const requestChanges = mutation({
           .map((screen) => screen.stitchScreenId)
           .filter(Boolean),
       );
-      const targetsCurrentVersion = comments.every((comment) => {
-        const screenId = (JSON.parse(comment) as { screenId?: string }).screenId;
-        return Boolean(screenId && screenIds.has(screenId));
-      });
+      const targetsCurrentVersion = feedback.every(
+        (item) => item.screen && screenIds.has(item.screen.screenId),
+      );
       if (!targetsCurrentVersion) {
         throw new Error(
           "Older design versions are read-only. Reopen the latest version to revise it.",
@@ -92,7 +92,7 @@ export const requestChanges = mutation({
     }
     const REGENERATE_AT = {
       specification: "GeneratingSpecification",
-      design: isTargetedScreenChange ? "GeneratingDesign" : "GeneratingSpecification",
+      design: targeted ? "GeneratingDesign" : "GeneratingSpecification",
       preview: "GeneratingCode",
     } as const;
 
@@ -104,7 +104,7 @@ export const requestChanges = mutation({
       stage: project.currentStage,
       level: "info",
       message: `Changes requested on ${review.artifactType} v${review.version}`,
-      data: { comments },
+      data: { feedback },
     });
 
     await ctx.db.patch(review.projectId, { currentStage: back, attempts: 0 });
@@ -135,7 +135,7 @@ export const reviseSpecification = mutation({
     });
     await ctx.db.patch(reviewId, {
       status: "needs_changes",
-      comments: ["Edited in site plan review"],
+      comments: [{ comment: "Edited in site plan review" }],
     });
     await ctx.db.insert("reviews", {
       projectId: review.projectId,

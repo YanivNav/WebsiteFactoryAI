@@ -22,7 +22,7 @@
  * the Postgres port stops being a mechanical translation and becomes a rewrite.
  */
 
-import type { ArtifactType, Stage } from "@factory/shared";
+import type { ArtifactType, DesignScreenProgress, ReviewFeedback, Stage } from "@factory/shared";
 import type { StageResult } from "../stages";
 
 /** IDs are opaque strings at this boundary. Never leak `Id<"projects">` past it. */
@@ -98,11 +98,17 @@ export interface ProjectStore {
   }): Promise<ArtifactRecord>;
   getLatestApproved(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
   getLatestArtifact(projectId: ProjectId, type: ArtifactType): Promise<ArtifactRecord | null>;
-  getLatestReviewComments(projectId: ProjectId, type: ArtifactType): Promise<string[]>;
+  getLatestReviewFeedback(projectId: ProjectId, type: ArtifactType): Promise<ReviewFeedback[]>;
   getLatestReviewContext(
     projectId: ProjectId,
     type: ArtifactType,
-  ): Promise<{ comments: string[]; artifact: ArtifactRecord } | null>;
+  ): Promise<{ feedback: ReviewFeedback[]; artifact: ArtifactRecord } | null>;
+
+  // ── design progress (live per-screen state the dashboard renders directly) ──
+  /** Begin (or redo, after a crash) a design run: replace all rows with the plan. */
+  resetDesignProgress(projectId: ProjectId, screens: DesignScreenProgress[]): Promise<void>;
+  /** Move one screen through queued → generating → ready. Upserts by page path. */
+  updateDesignProgress(projectId: ProjectId, screen: DesignScreenProgress): Promise<void>;
 
   // ── blobs ──────────────────────────────────────────────────────────────────
   /** Never inline a blob into a document. Store it, keep the id. */

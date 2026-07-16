@@ -60,6 +60,10 @@ layer alive for that — just don't design for it now.)_
 - **Prompts are files, never string literals.** `packages/prompts/*.md`. They are
   inputs, so they get hashed.
 
+- **Do not introduce deprecated APIs.** Check the installed version's current official
+  documentation before adding or upgrading an SDK integration, and migrate existing
+  deprecated calls when encountered.
+
 - **Only `Workspace` touches the filesystem.** No stage handler may import `fs` or
   spawn a process directly. This is what keeps "laptop" and "container" the same code.
 
@@ -106,11 +110,20 @@ these or you will hit them.
 - **Never hot-write the `projects` document.** Convex uses optimistic concurrency:
   frequent writes to the same doc from the worker _while_ the dashboard also writes
   produce OCC retries and, under load, failures. So:
-  - progress and log output → **`logs`, as separate append-only documents** (no
-    contention, no shared row to fight over);
+  - log output → **`logs`, as separate append-only documents** (no contention, no
+    shared row to fight over);
+  - live progress the UI renders → **its own table, one small document per unit of
+    work** (`designProgress` is the pattern: one row per screen, patched through
+    queued → generating → ready). Same OCC properties as `logs`, but it is *state*;
   - the `projects` doc is written **only on a real stage transition**.
-  - If you ever want a progress bar, derive it from `logs`. Do not tick a counter on
-    `projects`.
+
+- **Logs are narration, never state.** No reader may branch on a log's message or
+  `data` to reconstruct what the pipeline is doing — that was tried, it produced
+  regex-parsing of human-readable messages in the UI, and it is banned. If the
+  dashboard needs to know something, give it a table (see `designProgress`) or a
+  field. The same goes for stuffing JSON into string fields: structured data gets a
+  typed shape (`ReviewFeedback` in `@factory/shared`), never `JSON.stringify` into a
+  `string[]`.
 
 - **Blobs never go inside documents.** Stitch HTML, screenshots, raw build output →
   Convex file storage, keep the `storageId`. Documents hold references, not payloads.
@@ -153,6 +166,13 @@ The factory owns direct writes to the default branch. Human development uses bra
 and pull requests. Before filesystem stages, the worker fetches and fast-forwards; after
 successful factory commits it pushes without force. A remote race causes a clean sync
 and deterministic rerun, never a force-push or invented merge resolution.
+
+After launch, the factory remains the operational control plane even when editing happens
+elsewhere. Codex, Claude, or a human may work on a branch, but the factory owns checks,
+preview, visual approval, merge, and Wix release so the user never needs Git or Wix CLI.
+In-app requests route to the earliest necessary stage: content/code changes can go directly
+to implementation, while new pages and changed flows return through specification and
+Stitch design before coding.
 
 ## Layout
 

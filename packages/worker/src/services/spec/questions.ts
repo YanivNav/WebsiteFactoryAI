@@ -1,4 +1,4 @@
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { ClarifyingQuestionSet, type QuestionSet } from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
 import { resolveModel } from "../llm";
@@ -10,12 +10,12 @@ export interface QuestionGenerator {
 export class LlmQuestionGenerator implements QuestionGenerator {
   async generate(brief: string): Promise<{ questions: QuestionSet; promptHash: string }> {
     const prompt = loadPrompt("questions");
-    const { object } = await generateObject({
+    const { output } = await generateText({
       model: resolveModel(),
-      schema: ClarifyingQuestionSet,
+      output: Output.object({ schema: ClarifyingQuestionSet }),
       instructions: prompt.text,
       prompt: brief,
     });
-    return { questions: object, promptHash: prompt.hash };
+    return { questions: output, promptHash: prompt.hash };
   }
 }

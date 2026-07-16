@@ -117,7 +117,18 @@ export default defineSchema({
       v.literal("rejected"),
       v.literal("needs_changes"),
     ),
-    comments: v.array(v.string()),
+    // Structured feedback. `screen` present ⇒ the comment targets one design screen.
+    // The string arm exists only for legacy dev data — `normalizeReviewFeedback`
+    // upgrades it at the read boundary; new writes are always structured objects.
+    comments: v.array(
+      v.union(
+        v.string(),
+        v.object({
+          comment: v.string(),
+          screen: v.optional(v.object({ screenId: v.string(), pageTitle: v.string() })),
+        }),
+      ),
+    ),
     approvedBy: v.optional(v.string()),
     approvedAt: v.optional(v.number()),
   })
@@ -152,9 +163,24 @@ export default defineSchema({
     requestedBy: v.string(),
   }).index("by_project_status", ["projectId", "status"]),
 
-  // Structured logs. The user-facing activity feed is DERIVED from these — we never
-  // rely on raw AI chatter for state. Raw output stays here, behind "Technical
-  // details", for the operator.
+  // Live design-generation progress: one document per screen, patched in place as the
+  // worker moves it queued → generating → ready. A dedicated table because this is
+  // STATE the dashboard renders, not chatter — deriving it from log messages is
+  // banned. One row per screen keeps worker writes off the `projects` document
+  // (the OCC guardrail), exactly like `logs`.
+  designProgress: defineTable({
+    projectId: v.id("projects"),
+    order: v.number(),
+    pageTitle: v.string(),
+    pagePath: v.string(),
+    status: v.union(v.literal("queued"), v.literal("generating"), v.literal("ready")),
+    screenshotStorageId: v.optional(v.id("_storage")),
+  }).index("by_project", ["projectId"]),
+
+  // Structured logs — the user-facing ACTIVITY FEED, and nothing more. Logs are
+  // write-only narration: no reader may branch on a log's message or `data` to
+  // reconstruct state. Anything the UI must know goes in a real table (see
+  // `designProgress`). Raw output stays here, behind "Technical details".
   logs: defineTable({
     projectId: v.id("projects"),
     stage: stageValidator,
