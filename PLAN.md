@@ -46,7 +46,7 @@ _(V2 may sell this to actual business owners, who genuinely cannot read anything
                      │
        ┌─────────────┼─────────────┐
        ▼             ▼             ▼
-    OpenAI    Google Stitch    Claude Agent SDK
+    OpenAI    Google Stitch    Code Agent
                                     │
                                     ▼
                               Wix Headless
@@ -76,7 +76,8 @@ interface Workspace {
   exec(cmd, args): Promise<ExecResult>
   readFile / writeFile / glob
   commit(message): Promise<string>
-  push(): Promise<void>                  // stub in V1
+  sync(): Promise<void>                  // fetch + fast-forward the canonical branch
+  push(): Promise<void>                  // push factory commits; never force-push
 }
 ```
 
@@ -86,20 +87,33 @@ V1 → `LocalWorkspace`. V2 → `RemoteWorkspace` (container volume). Business l
 
 ### What is actually durable
 
-- **Convex holds the truth**: brief, specification, design, approvals, stage. These are the **inputs**.
-- **The repo is derived state** — a function of (spec + design + config).
+- **Convex holds the project truth**: brief, specification, design, approvals, stage. These are the
+  durable generation inputs.
+- **The organization-owned GitHub repository holds the code truth.** Initially the code is derived
+  from Convex inputs, but it may later contain reviewed human edits that cannot be reconstructed
+  from those inputs alone.
 
-A lost workspace is a lost _cache_, not a lost project: regenerate it by re-running code generation from the approved spec and design. This is exactly what the artifact model is for.
+A lost local workspace is a lost _cache_, not lost code: clone the project's private GitHub
+repository, then resume from the approved Convex inputs and current default branch.
 
-**Therefore GitHub is not a foundation, it is a backup.** The Wix CLI `git init`s locally and `wix release` deploys **from the local checkout** — GitHub is not in the critical path to build or publish anything. It is cut from V1 and returns later as an **"Export to GitHub"** button for handoff.
+### GitHub backup and multi-computer development
 
-### Collaboration without git (this deletes a feature)
+Every Wix project gets a **private repository in one configured GitHub organization** during Phase 5.
+The worker sets it as `origin` and pushes every successful factory commit. This is mandatory backup,
+not an optional export.
 
-Requirement: two people, two computers, working on the same project.
+Developers can clone the repository on any computer. Human work uses branches and pull requests;
+the factory owns direct writes to the default branch. Before any code generation, check, preview, or
+publish operation, the worker fetches and fast-forwards to the current remote default branch. If the
+remote advances during a factory run, the worker never force-pushes: it discards the stale derived
+attempt, syncs the new head, and reruns the deterministic stage.
 
-The **lease already serializes execution** — only one code stage runs per project at a time. So both users submit **change requests through the web app**; they land in a **queue** against one canonical workspace and are processed **sequentially**. There is only ever one writer.
+The project lease still serializes all **factory** writes and the in-app change-request queue. GitHub
+serializes external developer collaboration through branches and PRs. Direct human pushes to the
+default branch should be protected against; otherwise no application-level lease can prevent a race.
 
-**Merge conflicts are therefore impossible, and AI conflict resolution never needs to be built.** Users never see a branch, a push, or a conflict — which is correct, because they cannot read code. Collaboration is a queue, not a VCS.
+Wix deployment still runs from the worker's checked-out repository, so GitHub does not replace Wix
+hosting. It makes the exact source durable, reviewable, and portable across computers.
 
 ### "Make changes later" is a stage, not a feature
 
@@ -109,7 +123,10 @@ This reuses the entire machine — worker, artifacts, versions, reviews, logs, p
 
 ### Code engine
 
-`@anthropic-ai/claude-agent-sdk` — Claude Code's engine as a library, running **in-process inside the worker** with `cwd` set to the checkout. It does `fs` + `bash` on whatever machine the worker is on; the worker then commits. No "cloud filesystem" abstraction is required — it's just a directory. Implements the `CodeGenerator` interface.
+`CodeGenerator` runs an agent against the checked-out workspace with one scoped task. The V1
+default uses the existing OpenAI key and a Codex coding model; `CODE_MODEL` keeps provider and model
+selection configurable. The agent edits and checks the real directory, then the worker commits and
+pushes. Alternative providers remain implementations of the same interface.
 
 ### Why Convex — and how we leave if we want to
 
@@ -145,7 +162,7 @@ Blast radius of a migration, if those hold: implement `ProjectStore` against Pos
 - **Publish target:** `settings.publishTarget: 'wix-managed' | 'custom'`, default `wix-managed` (Astro + `wix release`). `custom` is the escape hatch for sites needing custom auth/integrations; deferred to V2, but the `Publisher` interface exists in V1.
 - **Auth:** none in V1. Single hardcoded owner; the `owner` field exists so multi-user is a swap, not a refactor.
 - **Determinism:** every stage resolves inputs explicitly from Convex + workspace, and records `promptHash` + `inputsHash` on each artifact. No hidden conversational context, ever. Rerunning a stage tomorrow with the same inputs behaves the same way.
-- **Services stay isolated** behind `SpecGenerator` / `DesignGenerator` / `CodeGenerator` / `Publisher`. Wix logic never leaks into Claude logic. Any one can be swapped (Gemini, Codex, Cursor) with nothing else changing.
+- **Services stay isolated** behind `SpecGenerator` / `DesignGenerator` / `CodeGenerator` / `Publisher`. Wix logic never leaks into code-agent logic. Any one can be swapped without touching the stages.
 
 ---
 
@@ -233,7 +250,7 @@ gatePolicy: Set<Stage>                  // which Waiting* gates are active
 Not because a Wix builder is incapable of reading `astro check: TS2304`, but because making a designer debug a TypeScript error is exactly the waste this tool exists to remove. So the **self-healing loop is core Phase 5 work, not Phase 6 polish**:
 
 ```
-RunningChecks fails → feed the build error back to Claude → fix → rebuild
+RunningChecks fails → feed the build error back to the code agent → fix → rebuild
                     → up to N attempts → only then escalate
 ```
 
@@ -283,7 +300,7 @@ Draft
   → WaitingForDesignApproval           ⏸  "Review your design"
   → ProvisioningWix                        (scaffold: creates Wix site + local git repo)
   → WaitingForManualActions            ⏸  "Action needed" (deep-linked Wix dashboard tasks)
-  → GeneratingCode                         (Claude implements spec + design into the Astro app)
+  → GeneratingCode                         (the code agent implements the approved site)
   → [WaitingForCodeReview]             ⏸  developer mode only
   → RunningChecks                          (wix build, astro check — self-heals on failure)
   → GeneratingPreview                      (wix preview → shareable URL)
@@ -366,13 +383,13 @@ Directories, config, empty module stubs, and the API-key checklist. Every stage 
 
 | Key                                           | Used by                                       | Where to get it               |
 | --------------------------------------------- | --------------------------------------------- | ----------------------------- |
-| `OPENAI_API_KEY`                              | Spec generation (Phase 3)                     | platform.openai.com           |
 | `STITCH_API_KEY`                              | Design generation (Phase 4)                   | Stitch → Settings → API keys  |
-| `ANTHROPIC_API_KEY`                           | Code generation (Phase 5)                     | console.anthropic.com         |
+| `OPENAI_API_KEY`                              | Spec + code generation (Phases 3 and 5)       | platform.openai.com           |
 | `WIX_API_KEY`                                 | `wix login --api-key` in the worker (Phase 5) | Wix → API Keys Manager        |
+| `GITHUB_TOKEN`, `GITHUB_ORG`                  | Private repository backup (Phase 5)           | GitHub organization settings  |
 | `NEXT_PUBLIC_CONVEX_URL`, `CONVEX_DEPLOYMENT` | Dashboard ↔ Convex                            | generated by `npx convex dev` |
 
-`GITHUB_TOKEN` is deliberately **not** needed — GitHub is deferred (see V2).
+The GitHub token must be able to create private repositories in `GITHUB_ORG` and push to them.
 
 **Done when:** `pnpm install` succeeds, `pnpm typecheck` passes, `pnpm dev` boots an empty dashboard, `pnpm worker` starts and idles. Zero business logic exists.
 
@@ -419,8 +436,12 @@ _This subsumes Phase 2's guided intake wizard — build one, not both._
 
 - **ProvisioningWix:** non-interactive `npm create @wix/new@latest -- headless`; capture Wix project/site IDs.
 - **ManualActions:** auto-raise blocking tasks with Wix dashboard deep links. The worker will not pass a blocking incomplete task.
-- **GeneratingCode:** `ClaudeCodeGenerator` (Agent SDK). Given specification + design HTML/screenshots + repository + `CLAUDE.md` + **one scoped task**. Never "build my website" — always "implement stage X."
-- **RunningChecks + self-healing:** `wix build` / `astro check`; on failure, feed the error back to Claude and retry up to N times. **Users never see a stack trace.**
+- **GeneratingCode:** `CodeGenerator`, defaulting to an OpenAI Codex coding model. Given the
+  specification, design HTML/screenshots, repository, generated-site `AGENTS.md`, and **one scoped
+  task**. Never "build my website" — always a concrete implementation task.
+- **GitHub backup:** create a private organization repository after provisioning, push the scaffold,
+  sync before every filesystem stage, and push every successful factory commit without force.
+- **RunningChecks + self-healing:** `wix build` / `astro check`; on failure, feed the error back to the code agent and retry up to N times. **Users never see a stack trace.**
 - **Preview:** `wix preview` → URL artifact. **Publishing:** `wix release` → live URL.
 - Containerize: the same worker on Railway/Fly, persistent volume, `wix login --api-key`.
 
@@ -434,7 +455,7 @@ The plain-English "make changes" interface (`Completed → ChangeRequest → Gen
 
 - **Resumability** (Phase 1, then continuously): kill the worker mid-stage → restart → it resumes at the correct stage with no duplicate artifacts. Lease expiry prevents double-execution.
 - **Determinism:** rerun a stage with identical inputs → identical `inputsHash` / `promptHash`. Divergence means hidden state leaked in.
-- **Self-healing:** deliberately inject a broken component → confirm Claude repairs it and the user never sees the error.
+- **Self-healing:** deliberately inject a broken component → confirm the code agent repairs it and the user never sees the error.
 - **Non-programmer walkthrough:** run someone Wix-literate but non-technical through the entire flow. If they hit a word they don't understand, that's a bug.
 - **End-to-end:** one real brief ("portfolio site for a ceramics studio") → all stages → **a live Wix URL**. This is the V1 definition of done.
 
@@ -463,6 +484,7 @@ A user can:
 
 ## Explicitly deferred to V2
 
-Trigger.dev execution layer (`JobRunner` swap) · auth / multi-tenancy · `custom` publish target · **"Export to GitHub"** (handoff only — _not_ collaboration) · alternative generators (Gemini / Codex / Cursor) · plugin system.
+Trigger.dev execution layer (`JobRunner` swap) · auth / multi-tenancy · `custom` publish target ·
+alternative generators (Gemini / Claude / Cursor) · plugin system.
 
 Each is already an interface in V1. None require touching business logic.

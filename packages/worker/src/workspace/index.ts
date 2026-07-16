@@ -13,9 +13,9 @@
  * requests. Re-cloning is the *recovery* path, not the hot path — you pay for
  * crash-safety only when you actually crash.
  *
- * And a lost workspace is a lost *cache*, not a lost project: it is regenerated from
- * the approved specification + design, which live in Convex. Convex holds the truth;
- * the repository is derived state.
+ * A lost local workspace is a lost *cache*: clone the private organization repository,
+ * then resume from the approved specification + design in Convex. GitHub holds the code
+ * truth because reviewed human edits may not be derivable from Convex inputs.
  */
 
 export interface ExecResult {
@@ -27,23 +27,34 @@ export interface ExecResult {
 export interface Workspace {
   readonly root: string;
 
-  /** Reuse the checkout if HEAD matches; otherwise clone or scaffold it. */
-  materialize(projectId: string): Promise<void>;
+  /** Reuse the checkout if present; otherwise clone the canonical repository. */
+  materialize(
+    projectId: string,
+    source?: { cloneUrl: string; authorization: string },
+  ): Promise<void>;
 
   exec(
     cmd: string,
     args: string[],
-    options?: { cwd?: "root" | "parent"; env?: Record<string, string>; tty?: boolean },
+    options?: {
+      cwd?: "root" | "parent";
+      env?: Record<string, string>;
+      tty?: boolean;
+      stdin?: string;
+    },
   ): Promise<ExecResult>;
 
   readFile(path: string): Promise<string>;
-  writeFile(path: string, content: string): Promise<void>;
+  writeFile(path: string, content: string | Uint8Array): Promise<void>;
   glob(pattern: string): Promise<string[]>;
 
   commit(message: string): Promise<string>;
 
-  /** No-op in V1. GitHub is a backup, not a foundation — see PLAN.md. */
-  push(): Promise<void>;
+  setRemote(url: string): Promise<void>;
+  sync(authorization: string): Promise<void>;
+
+  /** Push factory commits to the private organization repository. Never force-push. */
+  push(authorization: string): Promise<void>;
 }
 
 export { LocalWorkspace } from "./local.js";

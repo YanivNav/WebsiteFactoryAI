@@ -9,7 +9,7 @@
  */
 
 import { hashInputs } from "../lib/hash.js";
-import { LlmSpecGenerator, type SpecGenerator, type SpecInput } from "../services/spec/index.js";
+import { LlmSpecGenerator, type SpecGenerator, type SpecInput } from "../services/spec";
 import { ClarifyingAnswerSet, ProjectSpecification } from "@factory/shared";
 import type { StageHandler } from "./types.js";
 

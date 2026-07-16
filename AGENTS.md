@@ -47,8 +47,10 @@ layer alive for that — just don't design for it now.)_
 - **Artifacts are append-only.** Never overwrite. A rejected specification produces
   `v2`; it does not mutate `v1`.
 
-- **Convex holds the truth; the repository is derived state.** A lost workspace is a
-  lost _cache_ — regenerate it from the approved specification and design.
+- **Convex holds the project inputs; GitHub holds the code truth.** A lost local workspace
+  is a lost _cache_ — clone the private organization repository, then resume from the
+  approved specification and design. Human code edits may exist only in GitHub and must
+  never be overwritten by regeneration.
 
 - **Never mix service logic.** Wix logic does not go in Codex files. Prompts do not
   go in `services/wix/`. Each service sits behind its own interface
@@ -140,13 +142,17 @@ The blast radius of a migration, if these hold: implement `ProjectStore` against
 Postgres, rewrite the dashboard's data hooks. The state machine, the stage handlers,
 and the services never notice.
 
-## Collaboration is a queue, not git
+## Collaboration uses both the queue and GitHub
 
-Two people on two computers both submit change requests through the app. The
-worker's lease serializes them against one canonical workspace, so **there is only
-ever one writer and merge conflicts are structurally impossible.** Do not introduce
-branching, pushing, or AI conflict resolution — it would solve a problem we have
-deliberately arranged not to have. GitHub returns in V2 only as "Export my code".
+In-app change requests remain a serialized queue: the worker lease guarantees only one
+factory writer per project. In Phase 5 every project also gets a private repository in
+the configured GitHub organization so its exact code is backed up and developers can
+work from multiple computers.
+
+The factory owns direct writes to the default branch. Human development uses branches
+and pull requests. Before filesystem stages, the worker fetches and fast-forwards; after
+successful factory commits it pushes without force. A remote race causes a clean sync
+and deterministic rerun, never a force-push or invented merge resolution.
 
 ## Layout
 

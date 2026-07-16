@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import z from "zod";
 import { loadPrompt } from "../../lib/prompts.js";
-import { resolveModel } from "../llm/index.js";
+import { resolveModel } from "../llm";
 
 export interface ScreenFeedbackInput {
   screenId: string;

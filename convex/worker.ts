@@ -63,6 +63,7 @@ export const leaseNextRunnable = mutation({
 
       return {
         id: project._id,
+        title: project.title,
         currentStage: project.currentStage,
         brief: project.brief,
         settings: project.settings,
@@ -124,6 +125,24 @@ export const commitResult = mutation({
           siteId: v.string(),
           appId: v.string(),
         }),
+        github: v.object({
+          owner: v.string(),
+          name: v.string(),
+          cloneUrl: v.string(),
+          htmlUrl: v.string(),
+          defaultBranch: v.string(),
+        }),
+      }),
+      v.object({
+        kind: v.literal("codeGenerated"),
+        next: stageValidator,
+        github: v.object({
+          owner: v.string(),
+          name: v.string(),
+          cloneUrl: v.string(),
+          htmlUrl: v.string(),
+          defaultBranch: v.string(),
+        }),
       }),
       v.object({
         kind: v.literal("manualTasks"),
@@ -170,6 +189,19 @@ export const commitResult = mutation({
         attempts: 0,
         lastError: undefined,
         wix: { ...project.wix, ...result.wix },
+        github: result.github,
+      });
+      return;
+    }
+
+    if (result.kind === "codeGenerated") {
+      await finishStageRun(ctx, project, "succeeded");
+      await ctx.db.patch(projectId, {
+        ...releaseLease,
+        currentStage: result.next,
+        attempts: 0,
+        lastError: undefined,
+        github: result.github,
       });
       return;
     }
@@ -291,6 +323,11 @@ export const getLatestArtifact = mutation({
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => await ctx.storage.generateUploadUrl(),
+});
+
+export const getStorageUrl = mutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => await ctx.storage.getUrl(storageId),
 });
 
 export const getLatestApproved = mutation({

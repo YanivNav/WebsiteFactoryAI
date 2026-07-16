@@ -8,10 +8,12 @@
  */
 
 import type { StageHandler } from "./types.js";
-import { WixCliService, type WixService } from "../services/wix/index.js";
-import { LocalWorkspace } from "../workspace/index.js";
+import { WixCliService, type WixService } from "../services/wix";
+import { GitHubRestService, type GitHubService } from "../services/github";
+import { LocalWorkspace } from "../workspace";
 
 let wixService: WixService | undefined;
+let githubService: GitHubService | undefined;
 
 function siteTemplate(value?: string) {
   return value === "commerce" ||
@@ -38,6 +40,13 @@ export const provisionWix: StageHandler = {
       },
       workspace,
     );
+    await ctx.log("Backing up the project to GitHub");
+    githubService ??= new GitHubRestService();
+    const github = await githubService.ensureRepository({
+      projectId: ctx.projectId,
+      projectTitle: ctx.projectTitle,
+      workspace,
+    });
     await ctx.log("Wix site is ready", {
       kind: "wix-provisioned",
       siteId: wix.siteId,
@@ -46,6 +55,6 @@ export const provisionWix: StageHandler = {
     // Manual Wix tasks are added only when a concrete site requirement calls for
     // one and its site-scoped dashboard path has been verified. Provisioning itself
     // has no human step, so code generation can begin immediately.
-    return { kind: "wixProvisioned", wix };
+    return { kind: "wixProvisioned", wix, github };
   },
 };

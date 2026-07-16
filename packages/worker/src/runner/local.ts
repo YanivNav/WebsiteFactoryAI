@@ -10,7 +10,7 @@
  */
 
 import { nextStage } from "@factory/shared";
-import type { JobRunner } from "./index.js";
+import type { JobRunner } from ".";
 import type { ProjectStore } from "../store";
 import { HANDLERS } from "../stages";
 import type { StageContext } from "../stages";
@@ -70,6 +70,7 @@ export class LocalRunner implements JobRunner {
     try {
       const ctx: StageContext = {
         projectId: project.id,
+        projectTitle: project.title,
         stage: project.currentStage,
         brief: project.brief,
         mode: project.settings.mode,
@@ -131,8 +132,17 @@ export class LocalRunner implements JobRunner {
           kind: "wixProvisioned",
           next: "GeneratingCode",
           wix: result.wix,
+          github: result.github,
         });
         console.log(`${prefix} completed → GeneratingCode`);
+      } else if (result.kind === "codeGenerated") {
+        const next = nextStage(project.currentStage, project.settings.mode);
+        await this.store.commitResult(project.id, this.workerId, {
+          kind: "codeGenerated",
+          next,
+          github: result.github,
+        });
+        console.log(`${prefix} completed → ${next}`);
       } else if (result.kind === "manualTasks") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "manualTasks",

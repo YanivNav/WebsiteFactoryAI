@@ -14,6 +14,10 @@
 
 import type { StageHandler } from "./types.js";
 import { fakeWork } from "./fake.js";
+import { GitHubRestService, type GitHubService } from "../services/github";
+import { LocalWorkspace } from "../workspace";
+
+let githubService: GitHubService | undefined;
 
 export const generateCode: StageHandler = {
   stage: "GeneratingCode",
@@ -30,6 +34,15 @@ export const generateCode: StageHandler = {
       await ctx.log("Building your site");
     }
 
+    const workspace = new LocalWorkspace(ctx.projectId);
+    githubService ??= new GitHubRestService();
+    await ctx.log("Syncing the project backup");
+    const github = await githubService.ensureRepository({
+      projectId: ctx.projectId,
+      projectTitle: ctx.projectTitle,
+      workspace,
+    });
+
     await fakeWork();
 
     // TODO(phase-5): ClaudeCodeGenerator.build({ spec, design, repo, task })
@@ -38,6 +51,6 @@ export const generateCode: StageHandler = {
       await ctx.store.completeChangeRequest(change.id, "done");
     }
 
-    return { kind: "advance" };
+    return { kind: "codeGenerated", github };
   },
 };

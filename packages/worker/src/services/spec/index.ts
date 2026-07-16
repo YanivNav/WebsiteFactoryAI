@@ -14,7 +14,7 @@
 import { generateObject } from "ai";
 import { ProjectSpecification, type AnswerSet, type Specification } from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
-import { resolveModel } from "../llm/index.js";
+import { resolveModel } from "../llm";
 
 /**
  * Everything the specification depends on, in one object.

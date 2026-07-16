@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import { ClarifyingQuestionSet, type QuestionSet } from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
-import { resolveModel } from "../llm/index.js";
+import { resolveModel } from "../llm";
 
 export interface QuestionGenerator {
   generate(brief: string): Promise<{ questions: QuestionSet; promptHash: string }>;

@@ -14,13 +14,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { ArtifactType, Stage } from "@factory/shared";
-import type {
-  ArtifactRecord,
-  CommittedResult,
-  LeasedProject,
-  ProjectId,
-  ProjectStore,
-} from "./index.js";
+import type { ArtifactRecord, CommittedResult, LeasedProject, ProjectId, ProjectStore } from ".";
 
 /**
  * The worker lives outside the Convex codebase, so it addresses functions by name
@@ -43,6 +37,7 @@ const FN = {
   getLatestArtifact: mut("worker:getLatestArtifact"),
   getLatestApproved: mut("worker:getLatestApproved"),
   generateUploadUrl: mut("worker:generateUploadUrl"),
+  getStorageUrl: mut("worker:getStorageUrl"),
   getLatestReviewComments: mut("worker:getLatestReviewComments"),
   getLatestReviewContext: mut("worker:getLatestReviewContext"),
   hasBlockingIncompleteTasks: mut("worker:hasBlockingIncompleteTasks"),
@@ -144,6 +139,18 @@ export class ConvexProjectStore implements ProjectStore {
     if (!response.ok) throw new Error(`Convex storage upload failed (${response.status})`);
     const result = (await response.json()) as { storageId: string };
     return result.storageId;
+  }
+
+  async getBlob(storageId: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+    const url = (await this.client.mutation(FN.getStorageUrl, { storageId })) as string | null;
+    if (!url) throw new Error("A design file is no longer available");
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Design file download failed (${response.status})`);
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType:
+        response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream",
+    };
   }
 
   async appendLog(input: {

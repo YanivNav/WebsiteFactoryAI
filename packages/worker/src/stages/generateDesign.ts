@@ -3,8 +3,8 @@ import { hashInputs } from "../lib/hash.js";
 import {
   LlmScreenFeedbackClassifier,
   type ScreenFeedbackClassifier,
-} from "../services/design-feedback/index.js";
-import { StitchDesignGenerator, type DesignGenerator } from "../services/stitch/index.js";
+} from "../services/design-feedback";
+import { StitchDesignGenerator, type DesignGenerator } from "../services/stitch";
 import type { StageHandler } from "./types.js";
 
 let generator: DesignGenerator | undefined;

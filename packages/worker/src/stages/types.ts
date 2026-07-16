@@ -21,10 +21,11 @@
  */
 
 import type { ProjectMode, Stage } from "@factory/shared";
-import type { ProjectId, ProjectStore } from "../store/index.js";
+import type { GitHubProject, ProjectId, ProjectStore } from "../store";
 
 export interface StageContext {
   projectId: ProjectId;
+  projectTitle: string;
   stage: Stage;
   brief: string;
   mode: ProjectMode;
@@ -79,7 +80,9 @@ export type StageResult =
   | {
       kind: "wixProvisioned";
       wix: { projectId?: string; siteId: string; appId: string };
+      github: GitHubProject;
     }
+  | { kind: "codeGenerated"; github: GitHubProject }
   /** Blocked on a human. Raises tasks and parks the project in WaitingForManualActions. */
   | { kind: "manualTasks"; tasks: ManualTaskDraft[] }
   /** Failed. The lease is released and the stage becomes leasable again. */

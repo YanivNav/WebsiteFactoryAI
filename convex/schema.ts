@@ -69,6 +69,15 @@ export default defineSchema({
         previewUrl: v.optional(v.string()),
       }),
     ),
+    github: v.optional(
+      v.object({
+        owner: v.string(),
+        name: v.string(),
+        cloneUrl: v.string(),
+        htmlUrl: v.string(),
+        defaultBranch: v.string(),
+      }),
+    ),
     // The atomic lease. This is what prevents two workers from executing the same
     // stage — and the same serialization is what makes the change-request queue
     // conflict-free, because there is only ever one writer per project.

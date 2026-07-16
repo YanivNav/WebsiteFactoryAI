@@ -31,6 +31,7 @@ export type ArtifactId = string;
 
 export interface LeasedProject {
   id: ProjectId;
+  title: string;
   currentStage: Stage;
   brief: string;
   settings: {
@@ -56,7 +57,9 @@ export type CommittedResult =
       kind: "wixProvisioned";
       next: Stage;
       wix: { projectId?: string; siteId: string; appId: string };
+      github: GitHubProject;
     }
+  | { kind: "codeGenerated"; next: Stage; github: GitHubProject }
   | { kind: "manualTasks"; tasks: unknown[] }
   | { kind: "failed"; error: string };
 
@@ -104,6 +107,7 @@ export interface ProjectStore {
   // ── blobs ──────────────────────────────────────────────────────────────────
   /** Never inline a blob into a document. Store it, keep the id. */
   putBlob(bytes: Uint8Array, contentType: string): Promise<string>;
+  getBlob(storageId: string): Promise<{ bytes: Uint8Array; contentType: string }>;
 
   // ── logs (separate table, append-only — the Convex OCC guardrail) ──────────
   appendLog(input: {
@@ -122,6 +126,14 @@ export interface ProjectStore {
     projectId: ProjectId,
   ): Promise<{ id: string; description: string } | null>;
   completeChangeRequest(changeRequestId: string, status: "done" | "failed"): Promise<void>;
+}
+
+export interface GitHubProject {
+  owner: string;
+  name: string;
+  cloneUrl: string;
+  htmlUrl: string;
+  defaultBranch: string;
 }
 
 export type { StageResult };
