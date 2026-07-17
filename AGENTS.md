@@ -1,4 +1,4 @@
-# AGENTS.md — conventions for this repository
+# AGENTS.md
 
 Read [PLAN.md](PLAN.md) before doing anything. It is the contract.
 

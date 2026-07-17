@@ -1,5 +1,5 @@
 /** Dashboard-facing project CRUD and minimal waiting-gate controls. */
-import { isRunnableStage, isWaitingStage, nextStage } from "@factory/shared";
+import {isRunnableStage, isWaitingStage, nextStage, STAGES} from "@factory/shared";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
@@ -12,10 +12,8 @@ export const create = mutation({
       title,
       owner: SINGLE_USER,
       status: "active",
-      currentStage: "Draft",
       brief,
       settings: { mode: "simple", publishTarget: "wix-managed" },
-      attempts: 0,
     });
 
     await ctx.db.insert("logs", {

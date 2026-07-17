@@ -15,7 +15,7 @@ export interface StageContext {
 }
 
 export type StageResult =
-  { kind: "advance" } | { kind: "failed"; error: string; retryable: boolean };
+  { kind: "advance", target?: Stage | 'next' } | { kind: "failed"; error: string; };
 
 export interface StageHandler {
   readonly stage: Stage;

@@ -54,7 +54,7 @@ export class LocalRunner implements JobRunner {
         attempts: project.attempts,
         store: this.store,
         log: async (message, data) => {
-          console.error(`${prefix} ${message}`);
+          console.info(`${prefix} ${message}`);
           await this.store.appendLog({
             projectId: project.id,
             stage: project.currentStage,

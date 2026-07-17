@@ -16,42 +16,10 @@
 
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {STAGES} from "@factory/shared";
 
 export const stageValidator = v.union(
-  v.literal("Draft"),
-  v.literal("GeneratingQuestions"),
-  v.literal("WaitingForAnswers"),
-  v.literal("GeneratingSpecification"),
-  v.literal("WaitingForSpecificationApproval"),
-  v.literal("GeneratingDesign"),
-  v.literal("WaitingForDesignApproval"),
-  v.literal("ProvisioningWix"),
-  v.literal("WaitingForManualActions"),
-  v.literal("GeneratingCode"),
-  v.literal("WaitingForCodeReview"),
-  v.literal("RunningChecks"),
-  v.literal("GeneratingPreview"),
-  v.literal("RunningWebsiteQA"),
-  v.literal("WaitingForFinalApproval"),
-  v.literal("Publishing"),
-  v.literal("Completed"),
-);
-
-export const artifactTypeValidator = v.union(
-  v.literal("brief"),
-  v.literal("questions"),
-  v.literal("answers"),
-  v.literal("businessRequirements"),
-  v.literal("wixCapabilitySnapshot"),
-  v.literal("wixSolutionArchitecture"),
-  v.literal("implementationPlan"),
-  v.literal("specification"),
-  v.literal("design"),
-  v.literal("buildReport"),
-  v.literal("preview"),
-  v.literal("websiteQaPlan"),
-  v.literal("websiteQaReport"),
-  v.literal("releaseReport"),
+  ...STAGES.map(stage => v.literal(stage))
 );
 
 export default defineSchema({
@@ -65,7 +33,6 @@ export default defineSchema({
       mode: v.union(v.literal("simple"), v.literal("developer")),
       publishTarget: v.union(v.literal("wix-managed"), v.literal("custom")),
       businessName: v.optional(v.string()),
-      siteTemplate: v.optional(v.string()),
     }),
     wix: v.optional(
       v.object({
@@ -80,8 +47,6 @@ export default defineSchema({
       v.object({
         owner: v.string(),
         name: v.string(),
-        cloneUrl: v.string(),
-        htmlUrl: v.string(),
         defaultBranch: v.string(),
       }),
     ),
@@ -90,119 +55,29 @@ export default defineSchema({
     // conflict-free, because there is only ever one writer per project.
     leaseWorkerId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
-    attempts: v.number(),
-    lastError: v.optional(v.string()),
     // Incremented when the user deliberately starts planning again from the brief.
     // Old artifacts stay append-only, but planning stages only reuse artifacts from
     // the current cycle.
-    planningCycle: v.optional(v.number()),
+    planningCycle: v.number(),
+    progress: v.optional(v.object({
+      step: v.number(),
+      total: v.number()
+    }))
   })
-    // Leasing scans by stage, so index it. `by_stage_lease` lets the worker find
-    // "runnable stage, and either unleased or the lease has expired" cheaply.
     .index("by_stage", ["currentStage"])
     .index("by_owner", ["owner"]),
 
-  // Append-only. NEVER overwrite. A rejected specification produces v2 — it does not
-  // mutate v1. `promptHash` + `inputsHash` are what make "deterministic from its
-  // inputs" an enforceable claim rather than a hopeful one.
   artifacts: defineTable({
     projectId: v.id("projects"),
-    type: artifactTypeValidator,
+    stage: stageValidator,
+    planningCycle: v.number(),
     version: v.number(),
     data: v.any(),
     storageId: v.optional(v.id("_storage")), // blobs never live inside documents
     promptHash: v.string(),
     inputsHash: v.string(),
-    planningCycle: v.optional(v.number()),
-  })
-    .index("by_project", ["projectId"])
-    .index("by_project_type", ["projectId", "type"]),
-
-  reviews: defineTable({
-    projectId: v.id("projects"),
-    artifactId: v.id("artifacts"),
-    artifactType: artifactTypeValidator,
-    version: v.number(),
-    status: v.union(
-      v.literal("waiting"),
-      v.literal("approved"),
-      v.literal("rejected"),
-      v.literal("needs_changes"),
-    ),
-    // Structured feedback. `screen` present ⇒ the comment targets one design screen.
-    // The string arm exists only for legacy dev data — `normalizeReviewFeedback`
-    // upgrades it at the read boundary; new writes are always structured objects.
-    comments: v.array(
-      v.union(
-        v.string(),
-        v.object({
-          comment: v.string(),
-          screen: v.optional(v.object({ screenId: v.string(), pageTitle: v.string() })),
-        }),
-      ),
-    ),
-    approvedBy: v.optional(v.string()),
-    approvedAt: v.optional(v.number()),
-  })
-    .index("by_project", ["projectId"])
-    .index("by_artifact", ["artifactId"]),
-
-  manualTasks: defineTable({
-    projectId: v.id("projects"),
-    stage: stageValidator,
-    // A generated checklist replaces older checklists. Optional only for legacy rows.
-    checklistKey: v.optional(v.string()),
-    taskKey: v.optional(v.string()),
-    active: v.optional(v.boolean()),
-    title: v.string(),
-    description: v.string(),
-    // Deep link into the exact Wix dashboard page. The user knows the Wix dashboard
-    // cold — send them somewhere they recognise, never "run this command".
-    wixDashboardUrl: v.optional(v.string()),
-    blocking: v.boolean(),
-    completed: v.boolean(),
-    configurationKey: v.optional(v.string()),
-    configurationLabel: v.optional(v.string()),
-    configurationPlaceholder: v.optional(v.string()),
-    instructions: v.optional(v.array(v.string())),
-    expectedFields: v.optional(v.array(v.object({ name: v.string(), description: v.string() }))),
-    configurationValue: v.optional(v.string()),
-    completedAt: v.optional(v.number()),
   }).index("by_project", ["projectId"]),
 
-  // The collaboration queue. Two people on two computers submit changes here; the
-  // worker's lease serializes them against one workspace. One writer, always — so
-  // merge conflicts are structurally impossible and never need resolving.
-  changeRequests: defineTable({
-    projectId: v.id("projects"),
-    description: v.string(),
-    status: v.union(
-      v.literal("queued"),
-      v.literal("running"),
-      v.literal("done"),
-      v.literal("failed"),
-    ),
-    requestedBy: v.string(),
-  }).index("by_project_status", ["projectId", "status"]),
-
-  // Live design-generation progress: one document per screen, patched in place as the
-  // worker moves it queued → generating → ready. A dedicated table because this is
-  // STATE the dashboard renders, not chatter — deriving it from log messages is
-  // banned. One row per screen keeps worker writes off the `projects` document
-  // (the OCC guardrail), exactly like `logs`.
-  designProgress: defineTable({
-    projectId: v.id("projects"),
-    order: v.number(),
-    pageTitle: v.string(),
-    pagePath: v.string(),
-    status: v.union(v.literal("queued"), v.literal("generating"), v.literal("ready")),
-    screenshotStorageId: v.optional(v.id("_storage")),
-  }).index("by_project", ["projectId"]),
-
-  // Structured logs — the user-facing ACTIVITY FEED, and nothing more. Logs are
-  // write-only narration: no reader may branch on a log's message or `data` to
-  // reconstruct state. Anything the UI must know goes in a real table (see
-  // `designProgress`). Raw output stays here, behind "Technical details".
   logs: defineTable({
     projectId: v.id("projects"),
     stage: stageValidator,
@@ -211,13 +86,5 @@ export default defineSchema({
     data: v.optional(v.any()),
   }).index("by_project", ["projectId"]),
 
-  stageRuns: defineTable({
-    projectId: v.id("projects"),
-    stage: stageValidator,
-    attempt: v.number(),
-    status: v.union(v.literal("running"), v.literal("succeeded"), v.literal("failed")),
-    startedAt: v.number(),
-    finishedAt: v.optional(v.number()),
-    error: v.optional(v.string()),
-  }).index("by_project", ["projectId"]),
+
 });
