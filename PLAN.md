@@ -1,5 +1,12 @@
 # AI Website Factory — V1 Build Plan
 
+> **`develop` branch status (July 17, 2026):** this branch was intentionally reset to
+> the architecture shell. It contains the dashboard and timeline plus Convex project
+> state, worker polling, atomic leasing, lease renewal, transitions, and placeholder
+> stage handlers. The implementation milestones and completion markers below describe
+> the preserved experimental branch and the intended product, not functionality that
+> currently exists on `develop`.
+
 ## Context
 
 Goal: a web application that turns a natural-language brief into a production Wix Headless website, pausing whenever human review or manual intervention is required, then continuing seamlessly after approval.

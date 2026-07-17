@@ -1,35 +1,26 @@
 /**
- * The stage registry — the worker's dispatch table.
+ * The stage dispatch table.
  *
- * Only *runnable* stages appear here. `Waiting*` stages have no handler BY DESIGN:
- * they are not things the worker does, they are things the worker declines to do.
- * That absence is the entire human-in-the-loop mechanism, and it is why no
- * pause/resume code exists anywhere in this codebase.
+ * Waiting stages are absent by design. Every runnable stage currently uses the same
+ * placeholder so the polling, leasing, renewal, transition, and recovery behavior can
+ * be developed independently from website-generation logic.
  */
+import { isRunnableStage, STAGES, STAGE_LABELS, type Stage } from "@factory/shared";
+import { fakeWork } from "./fake";
+import type { StageHandler } from "./types";
 
-import type { Stage } from "@factory/shared";
-import type { StageHandler } from "./types.js";
+export const HANDLERS = Object.fromEntries(
+  STAGES.filter(isRunnableStage).map((stage) => [
+    stage,
+    {
+      stage,
+      async run(context) {
+        await context.log(`${STAGE_LABELS[stage]} (placeholder)`);
+        await fakeWork();
+        return { kind: "advance" };
+      },
+    } satisfies StageHandler,
+  ]),
+) as Partial<Record<Stage, StageHandler>>;
 
-import { generateSpecification } from "./generateSpecification.js";
-import { generateQuestions } from "./generateQuestions.js";
-import { generateDesign } from "./generateDesign.js";
-import { provisionWix } from "./provisionWix.js";
-import { generateCode } from "./generateCode.js";
-import { runChecks } from "./runChecks.js";
-import { generatePreview } from "./generatePreview.js";
-import { runWebsiteQa } from "./runWebsiteQa.js";
-import { publish } from "./publish.js";
-
-export const HANDLERS: Partial<Record<Stage, StageHandler>> = {
-  GeneratingQuestions: generateQuestions,
-  GeneratingSpecification: generateSpecification,
-  GeneratingDesign: generateDesign,
-  ProvisioningWix: provisionWix,
-  GeneratingCode: generateCode,
-  RunningChecks: runChecks,
-  GeneratingPreview: generatePreview,
-  RunningWebsiteQA: runWebsiteQa,
-  Publishing: publish,
-};
-
-export type { StageHandler, StageContext, StageResult, ManualTaskDraft } from "./types.js";
+export type { StageContext, StageHandler, StageResult } from "./types";

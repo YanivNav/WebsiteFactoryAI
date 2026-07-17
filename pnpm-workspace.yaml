@@ -8,6 +8,6 @@ packages:
 #   unrs-resolver → ESLint resolver
 allowBuilds:
   esbuild: true
-  node-pty: true
+  node-pty: set this to true or false
   sharp: true
   unrs-resolver: true

@@ -1,16 +1,15 @@
 # AI Website Factory
 
-Turns a plain-language brief into a live **Wix Headless** website — pausing whenever a
-human is needed, and resuming seamlessly afterwards.
+Architecture baseline for a project-based website factory.
 
-> **Status: Phase 0 — scaffolding.** The structure exists; nothing is implemented yet.
-> See [PLAN.md](PLAN.md) for the full build plan and [CLAUDE.md](CLAUDE.md) for the
-> conventions.
+> **Status: architecture shell.** The dashboard, timeline, Convex state, worker polling,
+> atomic leasing, lease renewal, and crash recovery are implemented. Every actual website
+> generation step is intentionally a placeholder.
 
 ## The idea
 
 It is not a pipeline. **It is a Project.** A project has a current stage, artifacts,
-approvals, logs, and manual tasks. A background worker simply advances it. All progress
+logs, and a current stage. A background worker simply advances it. All progress
 lives in Convex, never in memory, so the system survives refreshes, restarts, and
 interruptions.
 
@@ -32,12 +31,7 @@ and the worker picks it up on its next tick. There is no pause/resume code anywh
                 │
              Convex        ← the only source of truth (state + work queue)
                 │
-        Background worker  ← leases work; owns the filesystem
-                │
-   ┌────────────┼────────────┐
-OpenAI    Google Stitch   Claude Agent SDK
-                              │
-                        Wix Headless (Astro)
+        Background worker  ← polls, leases, advances one stage
 ```
 
 The worker **pulls** work from Convex, so it needs no inbound address — no webhook, no
@@ -58,32 +52,17 @@ cp .env.example .env.local     # no keys needed to boot
 ```bash
 pnpm convex     # Convex dev server — writes CONVEX_DEPLOYMENT + NEXT_PUBLIC_CONVEX_URL
 pnpm dev        # dashboard → http://localhost:3000
-pnpm worker     # background worker (currently idles — no stages implemented)
+pnpm worker     # background worker; stages use a short placeholder handler
 ```
 
-### API keys
-
-None are required for Phase 0. Each is needed at the phase noted; see
-[`.env.example`](.env.example).
-
-| Key                                           | Needed for                                                 | Phase              |
-| --------------------------------------------- | ---------------------------------------------------------- | ------------------ |
-| `OPENAI_API_KEY`                              | Specification generation                                   | 3                  |
-| `STITCH_API_KEY`                              | Design generation (Google Stitch)                          | 4                  |
-| `ANTHROPIC_API_KEY`                           | Code generation (Claude Agent SDK)                         | 5                  |
-| `WIX_API_KEY`                                 | `wix login --api-key` — provision, build, preview, publish | 5                  |
-| `CONVEX_DEPLOYMENT`, `NEXT_PUBLIC_CONVEX_URL` | Dashboard ↔ Convex                                         | 1 (auto-generated) |
-
-`GITHUB_TOKEN` is deliberately absent. GitHub is not in the critical path — the Wix CLI
-runs `git init` locally and `wix release` deploys from the local checkout.
+No provider, Wix, GitHub, design, or browser-testing keys are used on this branch.
+Add integrations back one stage at a time behind the worker's stage-handler boundary.
 
 ## Who this is for
 
 Wix-literate business people who **cannot read code**. They know Stores, Bookings, CRM,
 CMS, and the Wix dashboard. That constraint shapes the product:
 
-- Review gates are **visual** — you approve a rendered preview, never a diff.
-- Build failures **never reach the user**; the AI repairs its own mistakes first.
-- Manual tasks **deep-link into the Wix dashboard** they already know.
-- Collaboration is a **queue**, not git. Two people submit change requests; the
-  worker serializes them. No branches, no pushes, no merge conflicts — ever.
+- The dashboard remains a realtime view over Convex.
+- Waiting stages remain non-runnable and require an explicit user action.
+- The worker remains the only process that leases and advances runnable work.

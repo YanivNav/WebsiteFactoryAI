@@ -8,10 +8,7 @@
  * @module
  */
 
-import type * as changeRequests from "../changeRequests.js";
-import type * as manualTasks from "../manualTasks.js";
 import type * as projects from "../projects.js";
-import type * as reviews from "../reviews.js";
 import type * as worker from "../worker.js";
 
 import type {
@@ -21,10 +18,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  changeRequests: typeof changeRequests;
-  manualTasks: typeof manualTasks;
   projects: typeof projects;
-  reviews: typeof reviews;
   worker: typeof worker;
 }>;
 

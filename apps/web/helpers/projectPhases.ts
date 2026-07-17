@@ -1,10 +1,7 @@
 import type { Stage } from "@factory/shared";
 
-export type ReturnPhase =
-  "sitePlan" | "visualDesign" | "wixSetup" | "siteBuild" | "finalReview" | "publishing";
-
 export const PROJECT_PHASES: Array<{
-  id: ReturnPhase;
+  id: string;
   label: string;
   startStage: Stage;
 }> = [

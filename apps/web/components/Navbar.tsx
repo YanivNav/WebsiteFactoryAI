@@ -1,29 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import {
-  Bolt,
-  ChartNoAxesCombined,
-  LayoutDashboard,
-  LoaderCircle,
-  Plus,
-  Rocket,
-  Settings,
-  Terminal,
-  X,
-} from "lucide-react";
+import { LayoutDashboard, LoaderCircle, Plus, Rocket, X } from "lucide-react";
 import Link from "next/link";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useRouter } from "next/navigation";
 
-const navigation = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, active: true },
-  { label: "Automations", href: "/automations", icon: Bolt },
-  { label: "Analytics", href: "/analytics", icon: ChartNoAxesCombined },
-  { label: "Logs", href: "/logs", icon: Terminal },
-  { label: "Settings", href: "/settings", icon: Settings },
-];
+const navigation = [{ label: "Dashboard", href: "/", icon: LayoutDashboard, active: true }];
 
 export function Navbar() {
   const [showNewProject, setShowNewProject] = useState(false);
