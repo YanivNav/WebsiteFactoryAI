@@ -12,9 +12,9 @@ export const complete = mutation({
   args: { taskId: v.id("manualTasks"), configurationValue: v.optional(v.string()) },
   handler: async (ctx, { taskId, configurationValue }) => {
     const task = await ctx.db.get(taskId);
-    if (!task || task.completed) return;
+    if (!task || task.completed || task.active === false) return;
 
-    const needsValue = /^Configure \S+ for /.test(task.title);
+    const needsValue = Boolean(task.configurationKey);
     const value = configurationValue?.trim();
     if (needsValue && !value) throw new Error("Enter the required value before marking this done");
 
@@ -33,7 +33,7 @@ export const complete = mutation({
       .collect();
 
     // Non-blocking tasks never hold the project up.
-    if (remaining.some((t) => t.blocking && !t.completed)) return;
+    if (remaining.some((t) => t.active !== false && t.blocking && !t.completed)) return;
 
     await ctx.db.insert("logs", {
       projectId: task.projectId,

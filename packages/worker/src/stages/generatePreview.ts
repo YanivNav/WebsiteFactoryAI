@@ -9,28 +9,53 @@
  */
 
 import type { StageHandler } from "./types.js";
+import { GitHubRestService, type GitHubService } from "../services/github";
 import { WixCliService, type WixService } from "../services/wix";
-import { LocalWorkspace } from "../workspace";
+import { LocalWorkspace, type Workspace } from "../workspace";
 import { hashInputs } from "../lib/hash.js";
 
-let wixService: WixService | undefined;
+interface PreviewDependencies {
+  githubService: GitHubService;
+  wixService: WixService;
+  workspace: Workspace;
+}
 
-export const generatePreview: StageHandler = {
-  stage: "GeneratingPreview",
+export function createGeneratePreview(overrides: Partial<PreviewDependencies> = {}): StageHandler {
+  return {
+    stage: "GeneratingPreview",
 
-  async run(ctx) {
-    await ctx.progress(10, "Preparing your Wix preview");
-    const workspace = new LocalWorkspace(ctx.projectId);
-    wixService ??= new WixCliService();
-    await ctx.progress(35, "Creating a shareable preview");
-    const preview = await wixService.preview(workspace);
-    await ctx.emitArtifact(
-      "preview",
-      { url: preview.url },
-      { promptHash: "", inputsHash: hashInputs({ stage: "GeneratingPreview" }) },
-    );
+    async run(ctx) {
+      const dependencies: PreviewDependencies = {
+        githubService: overrides.githubService ?? new GitHubRestService(),
+        wixService: overrides.wixService ?? new WixCliService(),
+        workspace: overrides.workspace ?? new LocalWorkspace(ctx.projectId),
+      };
+      await ctx.progress(8, "Preparing your Wix preview");
+      await ctx.progress(18, "Syncing the latest website version");
+      const sourceRevision = await dependencies.githubService.syncCanonical(dependencies.workspace);
+      await ctx.progress(32, "Verifying the website before previewing");
+      await dependencies.wixService.build(dependencies.workspace);
+      await ctx.progress(55, "Publishing a shareable Wix preview");
+      const preview = await dependencies.wixService.preview(dependencies.workspace, (message) =>
+        ctx.progress(70, message),
+      );
+      await ctx.emitArtifact(
+        "preview",
+        { url: preview.url, sourceRevision },
+        {
+          promptHash: "",
+          inputsHash: hashInputs({
+            stage: "GeneratingPreview",
+            sourceRevision,
+            wixSiteId: ctx.wix?.siteId,
+          }),
+        },
+      );
 
-    await ctx.progress(90, "Finalizing your preview");
-    return { kind: "advance" };
-  },
-};
+      await ctx.progress(96, "Wix preview is ready for testing");
+      return { kind: "advance" };
+    },
+  };
+}
+
+export const generatePreview = createGeneratePreview();

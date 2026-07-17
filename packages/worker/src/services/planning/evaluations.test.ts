@@ -9,6 +9,8 @@ const syllabusArchitecture: SolutionArchitecture = {
   journeySolutions: [
     {
       journeyId: "request_syllabus",
+      testPath: "/courses/{course-slug}",
+      browserTest: { kind: "interaction", path: "/courses/{course-slug}" },
       pattern: "custom contact and triggered email",
       rationale:
         "The current course is dynamic, so custom inputs create a contact and send a triggered email with course variables.",
@@ -23,6 +25,26 @@ const syllabusArchitecture: SolutionArchitecture = {
         },
       ],
       requiredConfiguration: [],
+      triggeredEmail: {
+        templateIdConfigurationKey: "triggeredEmailTemplateId",
+        variables: [
+          {
+            name: "recipientName",
+            description: "Name submitted by the visitor",
+            valueSource: "visitorInput",
+          },
+          {
+            name: "courseTitle",
+            description: "Current course title",
+            valueSource: "pageContext",
+          },
+          {
+            name: "syllabusDownloadUrl",
+            description: "Resolved syllabus download URL",
+            valueSource: "siteData",
+          },
+        ],
+      },
       acceptanceTests: [],
     },
   ],
@@ -50,4 +72,20 @@ test("the syllabus evaluation catches the old static Wix Forms mistake", () => {
   const result = evaluatePlanningArchitecture(evaluation, wrong);
   assert.equal(result.passed, false);
   assert.ok(result.failures.some((failure) => failure.includes("forms")));
+});
+
+test("the syllabus evaluation requires the exact triggered-email variable contract", () => {
+  const evaluation = PLANNING_EVALUATIONS.find((item) => item.id === "dynamic-course-syllabus");
+  assert.ok(evaluation);
+  const incomplete: SolutionArchitecture = {
+    ...syllabusArchitecture,
+    journeySolutions: syllabusArchitecture.journeySolutions.map((journey) => ({
+      ...journey,
+      triggeredEmail: { ...journey.triggeredEmail!, variables: [] },
+    })),
+  };
+
+  const result = evaluatePlanningArchitecture(evaluation, incomplete);
+  assert.equal(result.passed, false);
+  assert.ok(result.failures.some((failure) => failure.includes("recipientName")));
 });

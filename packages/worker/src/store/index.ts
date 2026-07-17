@@ -42,6 +42,7 @@ export interface LeasedProject {
   };
   attempts: number;
   planningCycle?: number;
+  wix?: { projectId?: string; siteId: string; appId: string };
 }
 
 export interface ArtifactRecord {
@@ -62,7 +63,14 @@ export type CommittedResult =
       github: GitHubProject;
     }
   | { kind: "codeGenerated"; next: Stage; github: GitHubProject }
-  | { kind: "manualTasks"; tasks: unknown[] }
+  | {
+      kind: "websiteQaCompleted";
+      next: Stage;
+      previewArtifactId: ArtifactId;
+      previewVersion: number;
+      previewUrl: string;
+    }
+  | { kind: "manualTasks"; checklistKey: string; tasks: unknown[] }
   | { kind: "failed"; error: string; retryable: boolean };
 
 export interface ProjectStore {
@@ -131,9 +139,19 @@ export interface ProjectStore {
 
   // ── manual tasks ───────────────────────────────────────────────────────────
   hasBlockingIncompleteTasks(projectId: ProjectId): Promise<boolean>;
+  /** Make one generated checklist current and retire tasks from older planning inputs. */
+  activateManualTaskChecklist(projectId: ProjectId, checklistKey: string): Promise<void>;
   getManualTaskStatuses(
     projectId: ProjectId,
-  ): Promise<Array<{ title: string; completed: boolean; configurationValue?: string }>>;
+    checklistKey: string,
+  ): Promise<
+    Array<{
+      taskKey: string;
+      completed: boolean;
+      configurationKey?: string;
+      configurationValue?: string;
+    }>
+  >;
 
   // ── change requests (the collaboration queue) ──────────────────────────────
   nextQueuedChangeRequest(

@@ -62,10 +62,26 @@ page-derived context, and ordered outcomes. Choose outcomes by intent, not appea
 course-syllabus dialog can use ordinary inputs, create or update a Wix contact, and send a triggered
 email populated with the current course and syllabus URL; it does not need `saveFormSubmission` or
 the Forms solution unless the business explicitly needs the submission stored in the Forms inbox.
-Mark triggered-email templates, sender details, and other Wix dashboard prerequisites as manual
-setup. Search, filtering, and purely local UI behavior are not business workflows.
+Mark publishing a triggered-email template as manual setup; choosing its sender is part of that one
+template task, not a separate runtime setting. Search, filtering, and purely local UI behavior are
+not business workflows.
+Only include journeys performed by a public website visitor in `visitorWorkflows`. Site-team work
+in the Wix dashboard, editorial CMS operations, exports, and background/system processes remain in
+the business requirements and Wix architecture; never turn them into public website interactions.
 List every required runtime value explicitly—for example, a published triggered-email template ID
 and its variable names—so implementation never invents or hardcodes configuration.
+
+Classify every required value with `valueSource`. Visitor-entered values (especially the email that
+receives a syllabus or reply) are `visitorInput`; current course/document values are `pageContext`;
+Wix CMS/business data is `siteData`; factory-created or discoverable resources are `generated`; and
+only a value that a person must genuinely configure in the Wix dashboard is `wixDashboard`.
+`requiresManualSetup` is true only when at least one required value is `wixDashboard`.
+
+For triggered email, the recipient is the Wix contact created from the visitor's submitted email.
+The sender is configured as part of publishing the triggered-email template, so do not request a
+separate `senderEmail` runtime value. Do not create admissions/program/team email settings merely to
+notify website managers: the site team is whoever has access to the Wix dashboard. Add a separate
+notification recipient only when the approved business requirements explicitly require one.
 
 ## CMS collections
 

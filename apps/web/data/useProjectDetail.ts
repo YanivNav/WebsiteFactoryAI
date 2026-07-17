@@ -16,6 +16,7 @@ import {
   type DesignScreenStatus,
   type QuestionSet,
   type ReviewFeedback,
+  type QaReport,
   type SolutionArchitecture,
   type Specification,
   type Stage,
@@ -65,6 +66,7 @@ export interface ProjectDetail {
   designProgress: DesignScreenView[];
   stageProgress: StageProgressView | null;
   solutionArchitecture: SolutionArchitecture | undefined;
+  websiteQaReport: QaReport | undefined;
   /** storageId → URL for design artifact assets (screenshots, HTML). */
   assetUrls: Record<string, string | null>;
 }
@@ -112,6 +114,7 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
     );
     const progressData = progressLog?.data as
       { kind: "stage-progress"; percent?: number; label?: string } | undefined;
+    const activeManualTasks = data.manualTasks.filter((task) => task.active !== false);
 
     return {
       project: data.project,
@@ -121,8 +124,8 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
       specificationVersions,
       designVersions,
       questions: artifactVersions<QuestionSet>(data.artifacts, "questions")[0]?.data,
-      manualTasks: [...data.manualTasks].sort((a, b) => a._creationTime - b._creationTime),
-      blockingTasks: data.manualTasks.filter((task) => !task.completed),
+      manualTasks: [...activeManualTasks].sort((a, b) => a._creationTime - b._creationTime),
+      blockingTasks: activeManualTasks.filter((task) => !task.completed),
       changeRequests: data.changeRequests,
       designProgress: data.designProgress,
       stageProgress:
@@ -136,6 +139,7 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
         data.artifacts,
         "wixSolutionArchitecture",
       )[0]?.data,
+      websiteQaReport: artifactVersions<QaReport>(data.artifacts, "websiteQaReport")[0]?.data,
       assetUrls: data.assetUrls,
     };
   }, [data]);

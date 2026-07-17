@@ -1,4 +1,4 @@
-import type { Specification } from "@factory/shared";
+import type { ImplementationUnit, Specification } from "@factory/shared";
 import type { Workspace } from "../../workspace";
 
 export interface CodeDesignScreen {
@@ -12,6 +12,7 @@ export interface CodeInput {
   task: string;
   specification: Specification;
   screens: CodeDesignScreen[];
+  unit?: ImplementationUnit;
 }
 
 export interface CodeResult {

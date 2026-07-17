@@ -13,10 +13,13 @@ export const ARTIFACT_TYPES = [
   "businessRequirements",
   "wixCapabilitySnapshot",
   "wixSolutionArchitecture",
+  "implementationPlan",
   "specification",
   "design",
   "buildReport",
   "preview",
+  "websiteQaPlan",
+  "websiteQaReport",
   "releaseReport",
 ] as const;
 
@@ -228,6 +231,21 @@ export const WixSolutionArchitecture = z.object({
   journeySolutions: z.array(
     z.object({
       journeyId: z.string(),
+      testPath: z.string().describe("Exact site route where this visitor journey is exercised"),
+      browserTest: z
+        .object({
+          kind: z
+            .enum(["interaction", "content", "none"])
+            .describe(
+              "interaction for a public control/form, content for a passive public experience, none for dashboard/system work",
+            ),
+          path: z
+            .string()
+            .nullable()
+            .describe("Exact public route or dynamic route pattern; null only when kind is none"),
+        })
+        .nullable()
+        .describe("Structured browser verification contract; null only for older saved artifacts"),
       pattern: z.string(),
       rationale: z.string(),
       wixCapabilities: z.array(z.string()),
@@ -245,8 +263,29 @@ export const WixSolutionArchitecture = z.object({
           key: z.string(),
           description: z.string(),
           canAutomate: z.boolean(),
+          valueSource: z
+            .enum(["wixDashboard", "visitorInput", "pageContext", "siteData", "generated"])
+            .nullable()
+            .describe(
+              "Where the runtime value originates. Null only when reading an older saved artifact.",
+            ),
         }),
       ),
+      triggeredEmail: z
+        .object({
+          templateIdConfigurationKey: z
+            .string()
+            .describe("Configuration key containing the published Wix Email ID"),
+          variables: z.array(
+            z.object({
+              name: z.string().describe("Exact case-sensitive variable name created in Wix"),
+              description: z.string().describe("What the variable displays in the email"),
+              valueSource: z.enum(["visitorInput", "pageContext", "siteData", "generated"]),
+            }),
+          ),
+        })
+        .nullable()
+        .describe("Exact Wix template contract for sendTriggeredEmail journeys; null otherwise"),
       acceptanceTests: z.array(z.string()),
     }),
   ),
@@ -261,6 +300,111 @@ export const WixSolutionArchitecture = z.object({
 });
 
 export type SolutionArchitecture = z.infer<typeof WixSolutionArchitecture>;
+
+export const IMPLEMENTATION_UNIT_KINDS = [
+  "foundation",
+  "data",
+  "solution",
+  "workflow",
+  "screen",
+  "change",
+] as const;
+
+/**
+ * The durable build graph for one approved specification + design pair. Units are
+ * intentionally small enough for the coding agent to implement and verify without
+ * carrying the entire website as one prompt.
+ */
+export const WebsiteImplementationPlan = z.object({
+  planHash: z.string(),
+  source: z.object({
+    specificationVersion: z.number().int().positive(),
+    designVersion: z.number().int().positive(),
+    changeRequestId: z.string().nullable(),
+  }),
+  units: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(IMPLEMENTATION_UNIT_KINDS),
+      title: z.string(),
+      task: z.string(),
+      screenPaths: z.array(z.string()),
+      acceptanceCriteria: z.array(z.string()),
+    }),
+  ),
+});
+
+export type ImplementationPlan = z.infer<typeof WebsiteImplementationPlan>;
+export type ImplementationUnit = ImplementationPlan["units"][number];
+
+export const WEBSITE_QA_CHECK_KINDS = ["route", "workflow"] as const;
+
+/** Deterministic executable checks derived from approved pages and visitor journeys. */
+export const WebsiteQaPlan = z.object({
+  planHash: z.string(),
+  source: z.object({
+    specificationVersion: z.number().int().positive(),
+    architectureVersion: z.number().int().positive(),
+    previewVersion: z.number().int().positive(),
+  }),
+  checks: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(WEBSITE_QA_CHECK_KINDS),
+      title: z.string(),
+      path: z.string(),
+      journeyId: z.string().nullable(),
+      workflowActions: z.array(z.string()),
+      expectations: z.array(z.string()),
+      execution: z.enum(["route", "interaction", "content", "absent"]),
+    }),
+  ),
+});
+
+export type QaPlan = z.infer<typeof WebsiteQaPlan>;
+export type QaPlanCheck = QaPlan["checks"][number];
+
+export const WEBSITE_QA_CHECK_STATUSES = ["passed", "repaired", "failed"] as const;
+
+export const WebsiteQaReport = z.object({
+  planHash: z.string(),
+  previewUrl: z.string().url(),
+  status: z.enum(["passed", "repaired", "needs_attention"]),
+  repairAttempts: z.number().int().nonnegative(),
+  summary: z.object({
+    passed: z.number().int().nonnegative(),
+    repaired: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  }),
+  checks: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      path: z.string(),
+      status: z.enum(WEBSITE_QA_CHECK_STATUSES),
+      evidence: z.array(z.string()),
+      failures: z.array(z.string()),
+      screenshotStorageId: z.string().nullable(),
+    }),
+  ),
+});
+
+export type QaReport = z.infer<typeof WebsiteQaReport>;
+
+/** Durable checkpoint written only after one unit passed verification and reached GitHub. */
+export const ImplementationUnitCheckpoint = z.object({
+  kind: z.literal("implementationUnit"),
+  ok: z.literal(true),
+  planHash: z.string(),
+  unitIndex: z.number().int().nonnegative(),
+  unitId: z.string(),
+  unitTitle: z.string(),
+  summary: z.string(),
+  model: z.string(),
+  initialBaseRevision: z.string(),
+  revision: z.string(),
+  checks: z.array(z.string()),
+});
 
 export const DESIGN_VIEWPORTS = ["desktop", "mobile", "tablet"] as const;
 
@@ -459,6 +603,18 @@ export const ProjectSpecification = z.object({
                     description: z
                       .string()
                       .describe("The exact value needed and where it comes from"),
+                    valueSource: z
+                      .enum([
+                        "wixDashboard",
+                        "visitorInput",
+                        "pageContext",
+                        "siteData",
+                        "generated",
+                      ])
+                      .nullable()
+                      .describe(
+                        "Where the value comes from. Null only when reading an older saved artifact.",
+                      ),
                   }),
                 )
                 .describe(
@@ -485,7 +641,12 @@ export function parseProjectSpecification(value: unknown): Specification {
   const copy = JSON.parse(JSON.stringify(value)) as {
     infrastructure?: {
       cmsCollections?: Array<{ fields?: Array<Record<string, unknown>> }>;
-      visitorWorkflows?: unknown[];
+      visitorWorkflows?: Array<{
+        actions?: Array<{
+          type?: string;
+          requiredConfiguration?: Array<Record<string, unknown>>;
+        }>;
+      }>;
     };
   };
   for (const collection of copy.infrastructure?.cmsCollections ?? []) {
@@ -495,7 +656,44 @@ export function parseProjectSpecification(value: unknown): Specification {
   }
   copy.infrastructure ??= {};
   copy.infrastructure.visitorWorkflows ??= [];
+  for (const workflow of copy.infrastructure.visitorWorkflows) {
+    for (const action of workflow.actions ?? []) {
+      for (const configuration of action.requiredConfiguration ?? []) {
+        if (!("valueSource" in configuration)) {
+          configuration.valueSource =
+            action.type === "sendTriggeredEmail" && configuration.key === "triggeredEmailTemplateId"
+              ? "wixDashboard"
+              : "generated";
+        }
+      }
+    }
+  }
   return ProjectSpecification.parse(copy);
+}
+
+/** Read architecture artifacts created before configuration sources were explicit. */
+export function parseWixSolutionArchitecture(value: unknown): SolutionArchitecture {
+  if (!value || typeof value !== "object") return WixSolutionArchitecture.parse(value);
+  const copy = JSON.parse(JSON.stringify(value)) as {
+    journeySolutions?: Array<{
+      browserTest?: unknown;
+      triggeredEmail?: unknown;
+      testPath?: unknown;
+      requiredConfiguration?: Array<Record<string, unknown>>;
+    }>;
+  };
+  for (const journey of copy.journeySolutions ?? []) {
+    if (!("browserTest" in journey)) journey.browserTest = null;
+    if (!("triggeredEmail" in journey)) journey.triggeredEmail = null;
+    if (!("testPath" in journey)) journey.testPath = "/";
+    for (const configuration of journey.requiredConfiguration ?? []) {
+      if (!("valueSource" in configuration)) {
+        configuration.valueSource =
+          configuration.key === "triggeredEmailTemplateId" ? "wixDashboard" : "generated";
+      }
+    }
+  }
+  return WixSolutionArchitecture.parse(copy);
 }
 export type WixBusinessSolution = (typeof WIX_BUSINESS_SOLUTIONS)[number];
 export type SectionType = (typeof SECTION_TYPES)[number];

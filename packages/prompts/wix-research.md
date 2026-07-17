@@ -7,6 +7,11 @@ Base conclusions only on the returned official Wix documentation. Preserve conci
 the exact source URL, and retrieval time. If documentation cannot be retrieved or does not establish a
 needed fact, mark it unresolved rather than guessing.
 
+For sdkPackages, copy only the exact package IDs supplied by listWixCapabilities or
+inspectOfficialWixDocumentation. Never put an API name, operation, explanation, version, import
+path, or any other prose in this field. Package IDs are executable installation inputs maintained
+by the factory, not facts for you to infer.
+
 Distinguish native Headless SDK support, custom workflows composed from Wix APIs, dashboard-only
 configuration, and unsuitable solutions. Visible form fields alone are not evidence that Wix Forms is
 appropriate. Consider whether dynamic page context must be passed into backend operations.

@@ -31,11 +31,55 @@ export function WorkingWorkspace({
           retriesExhausted={retriesExhausted}
         />
       )}
+      {detail.stage === "RunningWebsiteQA" &&
+        /website checks? still need attention/i.test(detail.project.lastError ?? "") &&
+        detail.websiteQaReport?.status === "needs_attention" && (
+          <QaFailureDetails detail={detail} />
+        )}
       {!retriesExhausted && (
         <WorkingBanner projectTitle={detail.project.title} stage={detail.stage} />
       )}
       <ProgressView detail={detail} />
     </div>
+  );
+}
+
+function QaFailureDetails({ detail }: { detail: ProjectDetail }) {
+  const failed = detail.websiteQaReport?.checks.filter((check) => check.status === "failed") ?? [];
+  return (
+    <section className="border-outline rounded border bg-white p-5">
+      <p className="text-[10px] font-bold tracking-[0.1em] text-[#a82922] uppercase">
+        Checks needing attention
+      </p>
+      <div className="mt-3 divide-y divide-[#e1e3e6] border-y border-[#e1e3e6]">
+        {failed.map((check) => {
+          const screenshotUrl = check.screenshotStorageId
+            ? detail.assetUrls[check.screenshotStorageId]
+            : null;
+          return (
+            <div className="py-3" key={check.id}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">{check.title}</p>
+                  <p className="mt-0.5 text-[11px] text-[#697181]">{check.path}</p>
+                </div>
+                {screenshotUrl && (
+                  <a
+                    className="text-primary text-xs font-semibold hover:underline"
+                    href={screenshotUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    View evidence
+                  </a>
+                )}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-[#a82922]">{check.failures.join(" · ")}</p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

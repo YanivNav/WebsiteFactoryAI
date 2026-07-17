@@ -36,15 +36,28 @@ export interface ProvisionInput {
 
 export interface WixService {
   provision(input: ProvisionInput, workspace: Workspace): Promise<WixProject>;
+  ensureAppPermissions(
+    permissionIds: string[],
+    workspace: Workspace,
+    onProgress?: (message: string) => Promise<void>,
+  ): Promise<boolean>;
   prepareSiteResources(
     specification: Specification,
     externalMediaUrls: string[],
     workspace: Workspace,
     onProgress?: (message: string) => Promise<void>,
   ): Promise<WixSiteResources>;
+  ensureSdkPackages(
+    packageNames: string[],
+    workspace: Workspace,
+    onProgress?: (message: string) => Promise<void>,
+  ): Promise<void>;
   setEnvironmentVariables(values: Record<string, string>, workspace: Workspace): Promise<void>;
   build(workspace: Workspace): Promise<void>;
-  preview(workspace: Workspace): Promise<{ url: string }>;
+  preview(
+    workspace: Workspace,
+    onProgress?: (message: string) => Promise<void>,
+  ): Promise<{ url: string }>;
 }
 
 export interface WixSiteResources {
@@ -56,6 +69,10 @@ export interface WixSiteResources {
     fields: Array<{ target: string; label: string; required: boolean; identifier: string }>;
   }>;
   media: Array<{ sourceUrl: string; wixUrl: string }>;
+}
+
+export class WixAccountConfigurationError extends Error {
+  override readonly name = "WixAccountConfigurationError";
 }
 
 type CmsCollection = Specification["infrastructure"]["cmsCollections"][number];
@@ -138,6 +155,117 @@ function commandError(
   return detail ? `${fallback}: ${detail}` : fallback;
 }
 
+const WIX_PREVIEW_ATTEMPTS = 3;
+const WIX_PREVIEW_READY_ATTEMPTS = 6;
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isWixPreviewHost(hostname: string) {
+  return hostname.endsWith(".wix-host.com") || hostname.endsWith(".wix-site-host.com");
+}
+
+/** Extract only the deployed Wix preview, never a CLI help, login, or dashboard URL. */
+export function extractWixPreviewUrl(output: string) {
+  const plainOutput = output.replace(/\u001b\[[0-9;]*m/g, "");
+  const candidates = plainOutput.match(/https:\/\/[^\s<>"']+/g) ?? [];
+  for (const candidate of candidates) {
+    const cleaned = candidate.replace(/[),.;]+$/, "");
+    try {
+      const url = new URL(cleaned);
+      if (url.protocol === "https:" && isWixPreviewHost(url.hostname)) return url.toString();
+    } catch {
+      // Keep looking: CLI output may contain prose punctuation next to unrelated URLs.
+    }
+  }
+  return null;
+}
+
+function isRetryablePreviewFailure(output: string) {
+  return /ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR_SOCKET|STATE_MISMATCH|temporary system error|temporarily unavailable|try again shortly|socket.*closed|fetch failed/i.test(
+    output,
+  );
+}
+
+async function waitForPreviewToRespond(
+  url: string,
+  onProgress?: (message: string) => Promise<void>,
+  runtime: {
+    fetcher?: (input: string, init: RequestInit) => Promise<Response>;
+    sleep?: (milliseconds: number) => Promise<unknown>;
+    attempts?: number;
+  } = {},
+) {
+  const fetcher = runtime.fetcher ?? fetch;
+  const sleep = runtime.sleep ?? wait;
+  const attempts = runtime.attempts ?? WIX_PREVIEW_READY_ATTEMPTS;
+  let detail = "the preview did not respond";
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetcher(url, {
+        method: "GET",
+        redirect: "follow",
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (response.ok) return;
+      detail = `Wix returned ${response.status}`;
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
+    }
+    if (attempt < attempts) {
+      console.error(`[wix] preview is not ready — availability check ${attempt}/${attempts}`);
+      await onProgress?.(
+        `Waiting for Wix to make the preview available · ${attempt} of ${attempts}`,
+      );
+      await sleep(Math.min(attempt * 2_000, 8_000));
+    }
+  }
+  throw new Error(`Wix created the preview but it could not be opened: ${detail}`);
+}
+
+export async function deployWixPreview(
+  workspace: Workspace,
+  onProgress?: (message: string) => Promise<void>,
+  runtime: {
+    fetcher?: (input: string, init: RequestInit) => Promise<Response>;
+    sleep?: (milliseconds: number) => Promise<unknown>;
+    deploymentAttempts?: number;
+    readinessAttempts?: number;
+  } = {},
+): Promise<{ url: string }> {
+  const sleep = runtime.sleep ?? wait;
+  const deploymentAttempts = runtime.deploymentAttempts ?? WIX_PREVIEW_ATTEMPTS;
+  let lastFailure = "Wix preview failed";
+  for (let attempt = 1; attempt <= deploymentAttempts; attempt += 1) {
+    console.error(`[wix] creating preview — attempt ${attempt}/${deploymentAttempts}`);
+    if (attempt > 1) {
+      await onProgress?.(`Retrying Wix preview · ${attempt} of ${deploymentAttempts}`);
+    }
+    const result = await workspace.exec("wix", ["preview"], { env: { CI: "1" } });
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (result.exitCode === 0) {
+      const url = extractWixPreviewUrl(output);
+      if (!url) throw new Error("Wix created the preview but did not return its Wix-hosted URL");
+      console.error(`[wix] preview created — ${new URL(url).hostname}`);
+      await onProgress?.("Checking the Wix preview");
+      await waitForPreviewToRespond(url, onProgress, {
+        fetcher: runtime.fetcher,
+        sleep,
+        attempts: runtime.readinessAttempts,
+      });
+      return { url };
+    }
+
+    lastFailure = commandError(result, "Wix preview failed");
+    if (attempt === deploymentAttempts || !isRetryablePreviewFailure(output)) {
+      throw new Error(lastFailure);
+    }
+    await sleep(attempt * 2_000);
+  }
+  throw new Error(lastFailure);
+}
+
 async function siteToken(workspace: Workspace, siteId: string) {
   const result = await workspace.exec("wix", ["token", "--site", siteId], { env: { CI: "1" } });
   if (result.exitCode !== 0) throw new Error(commandError(result, "Wix access failed"));
@@ -208,13 +336,70 @@ async function wixRequest<T>(
   return body as T;
 }
 
+async function wixAccountRequest<T>(
+  apiKey: string,
+  accountId: string,
+  path: string,
+  init: RequestInit = {},
+) {
+  const method = init.method ?? "GET";
+  let response: Response;
+  try {
+    response = await fetch(`https://www.wixapis.com${path}`, {
+      ...init,
+      headers: {
+        Authorization: apiKey,
+        "Content-Type": "application/json",
+        "wix-account-id": accountId,
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    console.error(`[wix] ${method} app permissions — network failure`);
+    throw new Error(
+      `Wix setup failed while connecting the required Wix services: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  console.error(`[wix] ${method} app permissions — ${response.status}`);
+  const rawBody = await response.text();
+  let body:
+    | (T & {
+        message?: string;
+        error?: string;
+        details?: { applicationError?: { description?: string } };
+      })
+    | null = null;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    // Preserve a Wix proxy/plain-text error below.
+  }
+  if (!response.ok) {
+    const detail =
+      body?.details?.applicationError?.description ??
+      body?.message ??
+      body?.error ??
+      rawBody.trim().slice(0, 500);
+    if (response.status === 401 || response.status === 403) {
+      throw new WixAccountConfigurationError(
+        "Wix account access is incomplete. In the Wix API Keys Manager, give WIX_API_KEY the Manage Custom Apps permission, copy the Account ID into WIX_ACCOUNT_ID, restart the worker, and retry this step.",
+      );
+    }
+    throw new Error(
+      detail
+        ? `Wix setup failed while connecting the required Wix services: ${detail}`
+        : `Wix setup failed while connecting the required Wix services (${response.status})`,
+    );
+  }
+  return body as T;
+}
+
 async function ensureCmsDependencies(workspace: Workspace) {
   const manifest = JSON.parse(await workspace.readFile("package.json")) as {
     dependencies?: Record<string, string>;
   };
-  if (manifest.dependencies?.["@wix/wix-data-items-sdk"] && manifest.dependencies?.["@wix/data"])
-    return;
-  const install = await workspace.exec("npm", ["install", "@wix/data", "@wix/wix-data-items-sdk"]);
+  if (manifest.dependencies?.["@wix/data"]) return;
+  const install = await workspace.exec("npm", ["install", "@wix/data"]);
   if (install.exitCode !== 0) {
     throw new Error(commandError(install, "Wix CMS dependencies could not be installed"));
   }
@@ -413,6 +598,91 @@ async function ensureForms(siteId: string, token: string, enabled: boolean) {
 }
 
 export class WixCliService implements WixService {
+  async ensureAppPermissions(
+    permissionIds: string[],
+    workspace: Workspace,
+    onProgress: (message: string) => Promise<void> = async () => undefined,
+  ): Promise<boolean> {
+    const requested = [...new Set(permissionIds)].filter(Boolean);
+    if (requested.length === 0) return false;
+    const project = await existingProject(workspace);
+    if (!project) throw new Error("The Wix project must be provisioned before app permissions");
+    const apiKey = process.env.WIX_API_KEY;
+    if (!apiKey) throw new Error("WIX_API_KEY is not configured");
+    const accountId = process.env.WIX_ACCOUNT_ID;
+    if (!accountId) {
+      throw new WixAccountConfigurationError(
+        "WIX_ACCOUNT_ID is not configured. Copy the Account ID from the Wix API Keys Manager, add it to .env.local, restart the worker, and retry this step.",
+      );
+    }
+
+    await onProgress("Checking the Wix services required by this site");
+    const query = new URLSearchParams({ appId: project.appId, consistent: "true" });
+    const path = `/apps/v1/app-permissions/v1/app-permissions?${query.toString()}`;
+    const listed = await wixAccountRequest<{
+      appPermissions?: Array<{
+        permissionId?: string;
+        permission?: { permissionId?: string; id?: string };
+      }>;
+    }>(apiKey, accountId, path);
+    const existing = new Set(
+      (listed.appPermissions ?? []).flatMap((entry) => {
+        const id = entry.permission?.permissionId ?? entry.permission?.id ?? entry.permissionId;
+        return id ? [id] : [];
+      }),
+    );
+    const missing = requested.filter((permissionId) => !existing.has(permissionId));
+    if (missing.length === 0) return false;
+
+    await onProgress(
+      `Connecting ${missing.length} required Wix ${missing.length === 1 ? "service" : "services"}`,
+    );
+    for (const permissionId of missing) {
+      await wixAccountRequest(apiKey, accountId, "/apps/v1/app-permissions/v1/app-permissions", {
+        method: "POST",
+        body: JSON.stringify({
+          appPermission: {
+            appId: project.appId,
+            permission: { permissionId },
+          },
+        }),
+      });
+    }
+    await onProgress("Required Wix services are connected");
+    return true;
+  }
+
+  async ensureSdkPackages(
+    packageNames: string[],
+    workspace: Workspace,
+    onProgress: (message: string) => Promise<void> = async () => undefined,
+  ): Promise<void> {
+    const requested = [...new Set(packageNames)].filter(Boolean);
+    const invalid = requested.filter(
+      (name) => !/^@wix\/[a-z0-9][a-z0-9._-]*$/i.test(name) && name !== "@astrojs/react",
+    );
+    if (invalid.length > 0) {
+      throw new Error(
+        `Wix capability research returned unsupported packages: ${invalid.join(", ")}`,
+      );
+    }
+    if (requested.length === 0) return;
+    const manifest = JSON.parse(await workspace.readFile("package.json")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const installed = { ...manifest.dependencies, ...manifest.devDependencies };
+    const missing = requested.filter((name) => !installed[name]);
+    if (missing.length === 0) return;
+    await onProgress(
+      `Installing ${missing.length} required Wix SDK ${missing.length === 1 ? "package" : "packages"}`,
+    );
+    const install = await workspace.exec("npm", ["install", ...missing]);
+    if (install.exitCode !== 0) {
+      throw new Error(commandError(install, "Required Wix SDK packages could not be installed"));
+    }
+  }
+
   async setEnvironmentVariables(
     values: Record<string, string>,
     workspace: Workspace,
@@ -533,13 +803,10 @@ export class WixCliService implements WixService {
     if (result.exitCode !== 0) throw new Error(commandError(result, "Wix build failed"));
   }
 
-  async preview(workspace: Workspace): Promise<{ url: string }> {
-    const result = await workspace.exec("wix", ["preview"], { env: { CI: "1" } });
-    if (result.exitCode !== 0) throw new Error(commandError(result, "Wix preview failed"));
-    const output = `${result.stdout}\n${result.stderr}`.replace(/\u001b\[[0-9;]*m/g, "");
-    const urls = output.match(/https:\/\/[^\s<>"']+/g) ?? [];
-    const url = urls.find((candidate) => !candidate.includes("wix.com/cli"));
-    if (!url) throw new Error("Wix created the preview but did not return its URL");
-    return { url: url.replace(/[),.;]+$/, "") };
+  async preview(
+    workspace: Workspace,
+    onProgress?: (message: string) => Promise<void>,
+  ): Promise<{ url: string }> {
+    return await deployWixPreview(workspace, onProgress);
   }
 }

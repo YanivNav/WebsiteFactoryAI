@@ -6,68 +6,15 @@ import type { Doc, Id } from "@convex/_generated/dataModel";
 
 type ManualTask = Doc<"manualTasks">;
 
-function configurationKey(task: ManualTask) {
-  return task.title.match(/^Configure (\S+) for /)?.[1] ?? null;
-}
-
-function taskGuidance(task: ManualTask) {
-  const key = configurationKey(task);
-  if (key === "triggeredEmailTemplateId") {
-    return {
-      label: "Published Email ID",
-      placeholder: "For example: course_syllabus",
-      steps: [
-        "In the Wix dashboard, open Developer Tools → Triggered Emails.",
-        "Create a new campaign for new contacts and add the variables listed below.",
-        "Add and verify the sender details, then publish the email.",
-        "Copy its Email ID from the generated code snippet and paste it here.",
-      ],
-    };
-  }
-  if (key === "senderEmail") {
-    return {
-      label: "Verified sender email",
-      placeholder: "admissions@example.com",
-      steps: [
-        "Use the same verified reply-to address configured while publishing the triggered email.",
-        "Paste the address here; the factory will save it to the Wix project.",
-      ],
-    };
-  }
-  return {
-    label: key === "programEmail" ? "Program contact email" : "Admissions email",
-    placeholder: "team@example.com",
-    steps: [
-      "Enter the address that should receive these website enquiries.",
-      "The factory will save it to the Wix project and connect the generated form automatically.",
-    ],
-  };
-}
-
-function taskTitle(task: ManualTask) {
-  const key = configurationKey(task);
-  if (key === "triggeredEmailTemplateId") return "Create the syllabus email";
-  if (key === "senderEmail") return "Confirm the syllabus sender";
-  if (key === "admissionsEmail") return "Choose the admissions inbox";
-  if (key === "programEmail") return "Choose the course enquiries inbox";
-  return task.title;
-}
-
-function taskDescription(task: ManualTask) {
-  return task.description.split(/ Save the value in the Wix site's server-side/i)[0];
-}
-
 /** The WaitingForManualActions gate: Wix work only a human can do, deep-linked. */
 export function ManualActions({
   onComplete,
   projectTitle,
   tasks,
-  wixSiteId,
 }: {
   onComplete: (taskId: Id<"manualTasks">, configurationValue?: string) => void;
   projectTitle: string;
   tasks: ManualTask[];
-  wixSiteId?: string;
 }) {
   const required = tasks.filter((task) => task.blocking);
   const optional = tasks.filter((task) => !task.blocking);
@@ -96,19 +43,9 @@ export function ManualActions({
           Follow each task below. The factory saves the supplied settings to Wix for you.
         </div>
       )}
-      <TaskGroup
-        label="Required tasks"
-        onComplete={onComplete}
-        tasks={required}
-        wixSiteId={wixSiteId}
-      />
+      <TaskGroup label="Required tasks" onComplete={onComplete} tasks={required} />
       {optional.length > 0 && (
-        <TaskGroup
-          label="Optional optimizations"
-          onComplete={onComplete}
-          tasks={optional}
-          wixSiteId={wixSiteId}
-        />
+        <TaskGroup label="Optional optimizations" onComplete={onComplete} tasks={optional} />
       )}
     </section>
   );
@@ -118,12 +55,10 @@ function TaskGroup({
   label,
   onComplete,
   tasks,
-  wixSiteId,
 }: {
   label: string;
   onComplete: (taskId: Id<"manualTasks">, configurationValue?: string) => void;
   tasks: ManualTask[];
-  wixSiteId?: string;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
   return (
@@ -131,13 +66,15 @@ function TaskGroup({
       <h2 className="mb-3 text-xs font-bold tracking-[0.1em] text-[#424754] uppercase">{label}</h2>
       <div className="space-y-3">
         {tasks.map((task) => {
-          const key = configurationKey(task);
-          const guidance = key ? taskGuidance(task) : null;
-          const dashboardUrl =
-            task.wixDashboardUrl ??
-            (key === "triggeredEmailTemplateId" && wixSiteId
-              ? `https://manage.wix.com/dashboard/${encodeURIComponent(wixSiteId)}/home`
-              : undefined);
+          const guidance = task.configurationKey
+            ? {
+                label: task.configurationLabel ?? "Required Wix value",
+                placeholder: task.configurationPlaceholder ?? "Paste the value from Wix",
+                steps: task.instructions ?? [],
+                expectedFields: task.expectedFields ?? [],
+              }
+            : null;
+          const dashboardUrl = task.wixDashboardUrl;
           return (
             <article
               className={`rounded border p-5 ${
@@ -148,14 +85,14 @@ function TaskGroup({
               <div className="flex items-start gap-4">
                 {task.completed ? (
                   <span
-                    aria-label={`${taskTitle(task)} completed`}
+                    aria-label={`${task.title} completed`}
                     className="mt-0.5 grid size-6 shrink-0 place-items-center rounded border border-[#4b9b69] bg-[#d9f4e4] text-[#17693a]"
                   >
                     <Check size={15} strokeWidth={3} />
                   </span>
                 ) : (
                   <button
-                    aria-label={`Mark ${taskTitle(task)} done`}
+                    aria-label={`Mark ${task.title} done`}
                     className="border-outline hover:border-primary mt-0.5 size-6 shrink-0 rounded border bg-white hover:bg-[#edf5ff] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={Boolean(guidance && !values[task._id]?.trim())}
                     onClick={() => onComplete(task._id, values[task._id])}
@@ -164,14 +101,14 @@ function TaskGroup({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-semibold">{taskTitle(task)}</h3>
+                    <h3 className="text-sm font-semibold">{task.title}</h3>
                     {task.completed && (
                       <span className="text-[10px] font-bold tracking-[0.08em] text-[#17693a] uppercase">
                         Completed
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 text-xs leading-5 text-[#596170]">{taskDescription(task)}</p>
+                  <p className="mt-1 text-xs leading-5 text-[#596170]">{task.description}</p>
                   {guidance && !task.completed && (
                     <>
                       <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-5 text-[#424754]">
@@ -179,6 +116,28 @@ function TaskGroup({
                           <li key={step}>{step}</li>
                         ))}
                       </ol>
+                      {guidance.expectedFields.length > 0 && (
+                        <div className="mt-4 rounded border border-[#d7dbe2] bg-[#f7f8fa] p-3">
+                          <p className="text-xs font-semibold">Template variables</p>
+                          <dl className="mt-2 space-y-2">
+                            {guidance.expectedFields.map((field) => (
+                              <div
+                                className="grid gap-0.5 sm:grid-cols-[180px_1fr]"
+                                key={field.name}
+                              >
+                                <dt>
+                                  <code className="rounded bg-white px-1.5 py-0.5 text-xs font-semibold text-[#253a70]">
+                                    {field.name}
+                                  </code>
+                                </dt>
+                                <dd className="text-xs leading-5 text-[#596170]">
+                                  {field.description}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
+                      )}
                       <label
                         className="mt-4 block text-xs font-semibold"
                         htmlFor={`task-${task._id}`}
@@ -203,7 +162,7 @@ function TaskGroup({
                       rel="noreferrer"
                       target="_blank"
                     >
-                      Open this site’s Wix dashboard <ExternalLink size={13} />
+                      Open this task in Wix <ExternalLink size={13} />
                     </a>
                   )}
                 </div>

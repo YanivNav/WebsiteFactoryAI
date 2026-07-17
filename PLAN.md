@@ -85,6 +85,10 @@ V1 → `LocalWorkspace`. V2 → `RemoteWorkspace` (container volume). Business l
 
 **Workspaces are warm, not re-cloned per stage.** `materialize()` reuses an existing checkout when HEAD matches; `node_modules` persists across stages and change requests. Re-cloning is the _recovery_ path, not the hot path.
 
+When the local workspace cache is missing during Wix setup but the GitHub project already exists,
+restore `origin/main` before inspecting or provisioning Wix. Never create a fresh scaffold and try to
+merge its unrelated initial history into the canonical repository.
+
 ### What is actually durable
 
 - **Convex holds the project truth**: brief, specification, design, approvals, stage. These are the
@@ -325,6 +329,7 @@ Draft
   → [WaitingForCodeReview]             ⏸  developer mode only
   → RunningChecks                          (wix build, astro check — self-heals on failure)
   → GeneratingPreview                      (wix preview → shareable URL)
+  → RunningWebsiteQA                       (browser proof against that exact Wix preview)
   → WaitingForFinalApproval            ⏸  "Review your site"
   → Publishing                             (wix release → live URL)
   → Completed                          ⏸  resting state
@@ -348,7 +353,7 @@ projects        id, title, owner, status, currentStage, brief,
 
 artifacts       projectId, type, version, data, storageId?, promptHash, inputsHash, createdAt
                 type: brief | questions | answers | specification | design
-                    | buildReport | preview | releaseReport
+                    | implementationPlan | buildReport | preview | releaseReport
                 // append-only, versioned, NEVER overwritten
                 // `answers` is a DURABLE INPUT: GeneratingSpecification resolves it
                 // explicitly and folds it into inputsHash. Answers must never become
@@ -457,13 +462,30 @@ _This subsumes Phase 2's guided intake wizard — build one, not both._
 
 - **ProvisioningWix:** non-interactive `npm create @wix/new@latest -- headless`; capture Wix project/site IDs.
 - **ManualActions:** auto-raise blocking tasks with Wix dashboard deep links. The worker will not pass a blocking incomplete task.
+  Each approved specification produces one active checklist; activating it retires every older
+  checklist instead of accumulating completed tasks across planning passes. Required values declare
+  their source (`visitorInput`, `pageContext`, `siteData`, `generated`, or `wixDashboard`), and only
+  genuine `wixDashboard` values may become human tasks or server-side environment settings.
+  Triggered-email tasks show the exact case-sensitive template variables from the approved Wix
+  architecture; that same variable contract is binding for generated backend code.
 - **GeneratingCode:** `CodeGenerator`, defaulting to an OpenAI Codex coding model. Given the
   specification, design HTML/screenshots, repository, generated-site `AGENTS.md`, and **one scoped
-  task**. Never "build my website" — always a concrete implementation task.
+  task**. Never "build my website" — always a concrete implementation task. The approved inputs
+  produce a durable implementation plan: shared foundation → Wix content data → one unit per Wix
+  business solution → one unit per visitor workflow → one unit per route (with dialogs/states
+  grouped under their route). Capability research supplies a strictly scoped list of Wix SDK
+  capabilities; exact npm package IDs come from the factory's verified Wix package registry rather
+  than free-form model output, and only architecture-selected packages are installed. Each unit
+  is formatted, statically inspected, built with Wix, committed, pushed, and recorded before the
+  next starts. A failed unit gets one scoped repair pass; a retried stage resumes after the latest
+  verified unit instead of rebuilding successful work.
 - **GitHub backup:** create a private organization repository after provisioning, push the scaffold,
   sync before every filesystem stage, and push every successful factory commit without force.
 - **RunningChecks + self-healing:** `wix build` / `astro check`; on failure, feed the error back to the code agent and retry up to N times. **Users never see a stack trace.**
-- **Preview:** `wix preview` → URL artifact. **Publishing:** `wix release` → live URL.
+- **Preview:** synchronize the canonical GitHub revision, build it, run `wix preview`, accept only
+  the returned Wix-hosted URL, wait until it is reachable, and save the URL together with the exact
+  source revision. Transient Wix transport failures receive bounded retries. **Publishing:**
+  `wix release` → live URL.
 - Containerize: the same worker on Railway/Fly, persistent volume, `wix login --api-key`.
 
 ### Phase 6 — Change requests + hardening
@@ -499,24 +521,45 @@ on AI SDK agents, skills, and typed tools:
   because inputs are visible.
 - **Tool-driven execution:** provisioning uses typed, scoped Wix tools and runtime-derived schemas;
   skills teach solution patterns. Do not turn untrusted prose directly into unrestricted mutation
-  tools. Persist every capability/tool schema used as an input.
+  tools. Persist every capability/tool schema used as an input. Derive the generated private app's
+  least-privilege permissions from the approved site plan, reconcile them idempotently with Wix's
+  account-level App Permissions API, and refresh the preview before proof when permissions change.
 - **Generated human work:** only raise a manual action after the executor proves the remaining step
   cannot be automated safely. Tasks carry structured instructions, required values, validation, and
   a verified Wix dashboard destination when one is known.
-- **Scoped implementation:** generate foundation, data access, backend workflows, interactive
-  components, and pages as separate tasks from the approved architecture rather than one monolithic
-  “build the website” prompt.
+- **Scoped implementation ✅:** generate foundation, data access, backend workflows, interactive
+  components, and routes as separate durable tasks from the approved architecture rather than one
+  monolithic “build the website” prompt. Verify and checkpoint every task before continuing; group
+  alternate states such as dialogs with their parent route, and resume from the latest verified
+  checkpoint after interruption.
 
 Keep the agent runtime behind an `AgentRuntime` interface. Use AI SDK 7 first because the existing
 Convex project state, leases, waiting stages, and `Workspace` already supply durable orchestration.
 Re-evaluate Eve when the worker moves to cloud sandboxes; adopting another durable state machine
 before then would duplicate the project model.
 
-### Automated website QA — after Smart Planning and agentic implementation
+### Automated website QA — proof and reliability milestone ✅
 
 Add `RunningWebsiteQA` between preview creation and final approval. The solution architecture
 generates an acceptance-test plan from its visitor journeys; QA runs those tests against the real
 Wix preview and preserves them as the site's regression suite.
+
+The browser-proof foundation is implemented: plans and reports are append-only artifacts;
+Playwright visits every declared route, resolves dynamic routes from real links, checks navigation,
+assets, browser/request failures, headings, and form labels, then exercises every visitor workflow
+through stable workflow/state markers. Every check stores screenshot evidence. Failed checks receive
+one scoped repair, Wix rebuild, new preview, and complete rerun before the tested preview can enter
+final review. The final-review UI shows passed/repaired checks, while exhausted failures remain on
+the testing step with their evidence.
+
+The local worker installs its Chromium runtime with `pnpm qa:install-browser`; container images must
+run the same setup at build time. The service falls back to a system Chrome installation when one is
+already available.
+
+Continue hardening this layer with direct postcondition probes for each Wix business solution
+(contact records, CMS mutations, booking state, checkout state, and triggered-email inputs), visual
+diff thresholds against approved Stitch screens, mobile viewports when responsive design enters
+scope, and the representative evaluation corpus below.
 
 - Visit every route; detect broken navigation, assets, console errors, and failed requests.
 - Exercise dialogs, forms, search, filters, responsive layouts, loading/empty/error/success states,

@@ -80,6 +80,7 @@ export const leaseNextRunnable = mutation({
         settings: project.settings,
         attempts: project.attempts,
         planningCycle: project.planningCycle ?? 1,
+        wix: project.wix,
       };
     }
 
@@ -157,13 +158,33 @@ export const commitResult = mutation({
         }),
       }),
       v.object({
+        kind: v.literal("websiteQaCompleted"),
+        next: stageValidator,
+        previewArtifactId: v.id("artifacts"),
+        previewVersion: v.number(),
+        previewUrl: v.string(),
+      }),
+      v.object({
         kind: v.literal("manualTasks"),
+        checklistKey: v.string(),
         tasks: v.array(
           v.object({
+            taskKey: v.string(),
             title: v.string(),
             description: v.string(),
             wixDashboardUrl: v.optional(v.string()),
             blocking: v.boolean(),
+            configuration: v.optional(
+              v.object({
+                key: v.string(),
+                label: v.string(),
+                placeholder: v.optional(v.string()),
+                instructions: v.array(v.string()),
+                expectedFields: v.optional(
+                  v.array(v.object({ name: v.string(), description: v.string() })),
+                ),
+              }),
+            ),
           }),
         ),
       }),
@@ -218,23 +239,64 @@ export const commitResult = mutation({
       return;
     }
 
+    if (result.kind === "websiteQaCompleted") {
+      await finishStageRun(ctx, project, "succeeded");
+      await ctx.db.insert("reviews", {
+        projectId,
+        artifactId: result.previewArtifactId,
+        artifactType: "preview",
+        version: result.previewVersion,
+        status: "waiting",
+        comments: [],
+      });
+      await ctx.db.patch(projectId, {
+        ...releaseLease,
+        currentStage: result.next,
+        attempts: 0,
+        lastError: undefined,
+        wix: { ...project.wix, previewUrl: result.previewUrl },
+      });
+      return;
+    }
+
     if (result.kind === "manualTasks") {
       await finishStageRun(ctx, project, "succeeded");
       const existingTasks = await ctx.db
         .query("manualTasks")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
         .collect();
+      for (const existing of existingTasks) {
+        if (existing.active !== false && existing.checklistKey !== result.checklistKey) {
+          await ctx.db.patch(existing._id, { active: false });
+        }
+      }
       for (const task of result.tasks) {
         if (
-          existingTasks.some((existing) => existing.title === task.title && !existing.completed)
+          existingTasks.some(
+            (existing) =>
+              existing.active !== false &&
+              existing.checklistKey === result.checklistKey &&
+              existing.taskKey === task.taskKey,
+          )
         ) {
           continue;
         }
         await ctx.db.insert("manualTasks", {
           projectId,
           stage: project.currentStage,
-          ...task,
+          checklistKey: result.checklistKey,
+          taskKey: task.taskKey,
+          active: true,
+          title: task.title,
+          description: task.description,
+          wixDashboardUrl: task.wixDashboardUrl,
+          blocking: task.blocking,
           completed: false,
+          configurationKey: task.configuration?.key,
+          configurationLabel: task.configuration?.label,
+          configurationPlaceholder: task.configuration?.placeholder,
+          instructions: task.configuration?.instructions,
+          expectedFields: task.configuration?.expectedFields,
         });
       }
       await ctx.db.patch(projectId, {
@@ -291,7 +353,7 @@ export const appendArtifact = mutation({
     const artifactId = await ctx.db.insert("artifacts", { ...args, version });
 
     // Anything a human must sign off on gets a review row waiting for them.
-    const REVIEWABLE = ["specification", "design", "preview"];
+    const REVIEWABLE = ["specification", "design"];
     if (REVIEWABLE.includes(args.type)) {
       await ctx.db.insert("reviews", {
         projectId: args.projectId,
@@ -565,22 +627,40 @@ export const hasBlockingIncompleteTasks = mutation({
       .query("manualTasks")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
-    return tasks.some((t) => t.blocking && !t.completed);
+    return tasks.some((t) => t.active !== false && t.blocking && !t.completed);
   },
 });
 
-export const getManualTaskStatuses = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
+export const activateManualTaskChecklist = mutation({
+  args: { projectId: v.id("projects"), checklistKey: v.string() },
+  handler: async (ctx, { projectId, checklistKey }) => {
     const tasks = await ctx.db
       .query("manualTasks")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
-    return tasks.map(({ title, completed, configurationValue }) => ({
-      title,
-      completed,
-      configurationValue,
-    }));
+    for (const task of tasks) {
+      if (task.active !== false && task.checklistKey !== checklistKey) {
+        await ctx.db.patch(task._id, { active: false });
+      }
+    }
+  },
+});
+
+export const getManualTaskStatuses = mutation({
+  args: { projectId: v.id("projects"), checklistKey: v.string() },
+  handler: async (ctx, { projectId, checklistKey }) => {
+    const tasks = await ctx.db
+      .query("manualTasks")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    return tasks
+      .filter((task) => task.active !== false && task.checklistKey === checklistKey)
+      .map(({ taskKey, completed, configurationKey, configurationValue }) => ({
+        taskKey: taskKey ?? "",
+        completed,
+        configurationKey,
+        configurationValue,
+      }));
   },
 });
 

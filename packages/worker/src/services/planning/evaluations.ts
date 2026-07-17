@@ -6,6 +6,7 @@ export interface PlanningEvaluationCase {
   requiredCapabilities: string[];
   forbiddenCapabilities: string[];
   requiredEvidence: string[];
+  requiredTemplateVariables: string[];
 }
 
 /** Regression corpus for architecture decisions; expand whenever a real project exposes a miss. */
@@ -17,6 +18,7 @@ export const PLANNING_EVALUATIONS: PlanningEvaluationCase[] = [
     requiredCapabilities: ["contacts", "triggeredEmails"],
     forbiddenCapabilities: ["forms"],
     requiredEvidence: ["dynamic", "course", "contact", "triggered email"],
+    requiredTemplateVariables: ["recipientName", "courseTitle", "syllabusDownloadUrl"],
   },
   {
     id: "store-and-workshops",
@@ -24,6 +26,7 @@ export const PLANNING_EVALUATIONS: PlanningEvaluationCase[] = [
     requiredCapabilities: ["stores", "bookings"],
     forbiddenCapabilities: [],
     requiredEvidence: ["product", "booking"],
+    requiredTemplateVariables: [],
   },
   {
     id: "simple-portfolio",
@@ -31,6 +34,7 @@ export const PLANNING_EVALUATIONS: PlanningEvaluationCase[] = [
     requiredCapabilities: [],
     forbiddenCapabilities: ["stores", "bookings", "events", "pricingPlans", "members"],
     requiredEvidence: [],
+    requiredTemplateVariables: [],
   },
   {
     id: "custom-directory",
@@ -38,6 +42,7 @@ export const PLANNING_EVALUATIONS: PlanningEvaluationCase[] = [
     requiredCapabilities: ["cms"],
     forbiddenCapabilities: ["stores", "bookings"],
     requiredEvidence: ["directory", "CMS"],
+    requiredTemplateVariables: [],
   },
 ];
 
@@ -58,6 +63,11 @@ export function evaluatePlanningArchitecture(
   const hasCapability = (expected: string) =>
     [...selected].some((item) => item.includes(expected.toLowerCase()));
   const text = architectureText(architecture);
+  const templateVariables = new Set(
+    architecture.journeySolutions.flatMap(
+      (journey) => journey.triggeredEmail?.variables.map((variable) => variable.name) ?? [],
+    ),
+  );
   const failures = [
     ...evaluation.requiredCapabilities
       .filter((capability) => !hasCapability(capability))
@@ -68,6 +78,9 @@ export function evaluatePlanningArchitecture(
     ...evaluation.requiredEvidence
       .filter((term) => !text.includes(term.toLowerCase()))
       .map((term) => `architecture does not explain ${term}`),
+    ...evaluation.requiredTemplateVariables
+      .filter((name) => !templateVariables.has(name))
+      .map((name) => `triggered email is missing template variable ${name}`),
   ];
   return { passed: failures.length === 0, failures };
 }

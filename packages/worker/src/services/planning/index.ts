@@ -11,10 +11,15 @@ import {
 } from "@factory/shared";
 import { loadPrompt } from "../../lib/prompts.js";
 import { AiSdkAgentRuntime, type AgentRuntime } from "../agents";
+import {
+  normalizeCapabilitySdkPackages,
+  WIX_CAPABILITY_SDK_PACKAGES,
+} from "../wix/sdk-package-registry.js";
 
 const CAPABILITY_CATALOG = {
   cms: {
     name: "Wix CMS",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.cms,
     sources: [
       "https://dev.wix.com/docs/sdk/backend-modules/data/items/introduction",
       "https://dev.wix.com/docs/rest/business-management/data/data-collections/introduction",
@@ -22,10 +27,12 @@ const CAPABILITY_CATALOG = {
   },
   contacts: {
     name: "Wix CRM Contacts",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.contacts,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/crm/contacts/introduction"],
   },
   triggeredEmails: {
     name: "Wix Triggered Emails",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.triggeredEmails,
     sources: [
       "https://dev.wix.com/docs/develop-websites/articles/workspace-tools/developer-tools/triggered-emails/about-triggered-emails",
       "https://dev.wix.com/docs/develop-websites/articles/workspace-tools/developer-tools/triggered-emails/set-up-a-triggered-email",
@@ -33,30 +40,37 @@ const CAPABILITY_CATALOG = {
   },
   forms: {
     name: "Wix Forms",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.forms,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/forms/introduction"],
   },
   stores: {
     name: "Wix Stores",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.stores,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/stores/introduction"],
   },
   bookings: {
     name: "Wix Bookings",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.bookings,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/bookings/introduction"],
   },
   events: {
     name: "Wix Events",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.events,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/events/introduction"],
   },
   blog: {
     name: "Wix Blog",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.blog,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/blog/introduction"],
   },
   members: {
     name: "Wix Members",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.members,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/members/introduction"],
   },
   pricingPlans: {
     name: "Wix Pricing Plans",
+    sdkPackages: WIX_CAPABILITY_SDK_PACKAGES.pricingPlans,
     sources: ["https://dev.wix.com/docs/sdk/backend-modules/pricing-plans/introduction"],
   },
 } as const;
@@ -74,6 +88,8 @@ const SOLUTION_PATTERNS = {
       "send triggered email with page-derived variables",
     ],
     avoidWhen: "The business explicitly needs each submission stored and managed in Wix Forms.",
+    requiredContract:
+      "Define the exact triggeredEmail template variables, their meanings, and runtime sources. The recipient is the Wix Contact ID, not a template variable.",
   },
   wix_forms_submission: {
     useWhen:
@@ -210,7 +226,12 @@ export class SmartPlanningService {
             }
           }),
         );
-        return { id: capabilityId, name: capability.name, documents };
+        return {
+          id: capabilityId,
+          name: capability.name,
+          sdkPackages: capability.sdkPackages,
+          documents,
+        };
       },
     });
     const value = await this.runtime.runStructured({
@@ -226,6 +247,7 @@ export class SmartPlanningService {
             Object.entries(CAPABILITY_CATALOG).map(([id, item]) => ({
               id,
               name: item.name,
+              sdkPackages: item.sdkPackages,
               sources: item.sources,
             })),
         }),
@@ -233,7 +255,7 @@ export class SmartPlanningService {
       },
       prompt: `Business requirements:\n${JSON.stringify(requirements, null, 2)}`,
     });
-    return { value, promptHash: prompt.hash };
+    return { value: normalizeCapabilitySdkPackages(value), promptHash: prompt.hash };
   }
 
   async designArchitecture(

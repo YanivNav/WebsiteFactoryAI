@@ -81,6 +81,15 @@ export class OpenAICodexGenerator implements CodeGenerator {
     const model = modelName();
     const instruction = [
       prompt.text,
+      input.unit
+        ? [
+            `Current implementation unit: ${input.unit.title} (${input.unit.kind})`,
+            `Unit id: ${input.unit.id}`,
+            `Acceptance criteria:\n${input.unit.acceptanceCriteria
+              .map((criterion) => `- ${criterion}`)
+              .join("\n")}`,
+          ].join("\n")
+        : "",
       `Scoped task:\n${input.task}`,
       "Approved specification and screen inventory are in `.factory/context/site.json`.",
       `Screens to implement:\n${input.screens
@@ -90,7 +99,7 @@ export class OpenAICodexGenerator implements CodeGenerator {
         )
         .join("\n")}`,
     ].join("\n\n");
-    await onProgress("Creating pages and reusable sections");
+    await onProgress(input.unit ? `Implementing ${input.unit.title}` : "Implementing the site");
     const imageArgs = input.screens.flatMap((screen) => [
       "--image",
       path.resolve(workspace.root, screen.screenshotPath),

@@ -31,6 +31,7 @@ export const stageValidator = v.union(
   v.literal("WaitingForCodeReview"),
   v.literal("RunningChecks"),
   v.literal("GeneratingPreview"),
+  v.literal("RunningWebsiteQA"),
   v.literal("WaitingForFinalApproval"),
   v.literal("Publishing"),
   v.literal("Completed"),
@@ -43,10 +44,13 @@ export const artifactTypeValidator = v.union(
   v.literal("businessRequirements"),
   v.literal("wixCapabilitySnapshot"),
   v.literal("wixSolutionArchitecture"),
+  v.literal("implementationPlan"),
   v.literal("specification"),
   v.literal("design"),
   v.literal("buildReport"),
   v.literal("preview"),
+  v.literal("websiteQaPlan"),
+  v.literal("websiteQaReport"),
   v.literal("releaseReport"),
 );
 
@@ -146,6 +150,10 @@ export default defineSchema({
   manualTasks: defineTable({
     projectId: v.id("projects"),
     stage: stageValidator,
+    // A generated checklist replaces older checklists. Optional only for legacy rows.
+    checklistKey: v.optional(v.string()),
+    taskKey: v.optional(v.string()),
+    active: v.optional(v.boolean()),
     title: v.string(),
     description: v.string(),
     // Deep link into the exact Wix dashboard page. The user knows the Wix dashboard
@@ -153,6 +161,11 @@ export default defineSchema({
     wixDashboardUrl: v.optional(v.string()),
     blocking: v.boolean(),
     completed: v.boolean(),
+    configurationKey: v.optional(v.string()),
+    configurationLabel: v.optional(v.string()),
+    configurationPlaceholder: v.optional(v.string()),
+    instructions: v.optional(v.array(v.string())),
+    expectedFields: v.optional(v.array(v.object({ name: v.string(), description: v.string() }))),
     configurationValue: v.optional(v.string()),
     completedAt: v.optional(v.number()),
   }).index("by_project", ["projectId"]),

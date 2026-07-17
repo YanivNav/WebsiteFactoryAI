@@ -44,6 +44,7 @@ const FN = {
   resetDesignProgress: mut("worker:resetDesignProgress"),
   updateDesignProgress: mut("worker:updateDesignProgress"),
   hasBlockingIncompleteTasks: mut("worker:hasBlockingIncompleteTasks"),
+  activateManualTaskChecklist: mut("worker:activateManualTaskChecklist"),
   getManualTaskStatuses: mut("worker:getManualTaskStatuses"),
   claimChangeRequest: mut("worker:claimChangeRequest"),
   completeChangeRequest: mut("worker:completeChangeRequest"),
@@ -197,12 +198,30 @@ export class ConvexProjectStore implements ProjectStore {
     })) as boolean;
   }
 
+  async activateManualTaskChecklist(projectId: ProjectId, checklistKey: string): Promise<void> {
+    await this.client.mutation(FN.activateManualTaskChecklist, { projectId, checklistKey });
+  }
+
   async getManualTaskStatuses(
     projectId: ProjectId,
-  ): Promise<Array<{ title: string; completed: boolean; configurationValue?: string }>> {
+    checklistKey: string,
+  ): Promise<
+    Array<{
+      taskKey: string;
+      completed: boolean;
+      configurationKey?: string;
+      configurationValue?: string;
+    }>
+  > {
     return (await this.client.mutation(FN.getManualTaskStatuses, {
       projectId,
-    })) as Array<{ title: string; completed: boolean; configurationValue?: string }>;
+      checklistKey,
+    })) as Array<{
+      taskKey: string;
+      completed: boolean;
+      configurationKey?: string;
+      configurationValue?: string;
+    }>;
   }
 
   async nextQueuedChangeRequest(

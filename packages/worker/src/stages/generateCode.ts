@@ -2,17 +2,32 @@
 
 import {
   BusinessRequirements,
+  ImplementationUnitCheckpoint,
+  type ImplementationPlan,
   parseProjectSpecification,
+  parseWixSolutionArchitecture,
   ProjectDesign,
+  WebsiteImplementationPlan,
   WixCapabilitySnapshot,
-  WixSolutionArchitecture,
 } from "@factory/shared";
 import { hashInputs } from "../lib/hash.js";
 import { loadPrompt } from "../lib/prompts.js";
 import { OpenAICodexGenerator } from "../services/code/openai.js";
 import type { CodeDesignScreen, CodeGenerator } from "../services/code";
+import { createImplementationPlan, screensForUnit } from "../services/code/plan";
 import { GitHubRestService, type GitHubService } from "../services/github";
-import { WixCliService, type WixService, type WixSiteResources } from "../services/wix";
+import {
+  formatGeneratedSource,
+  validateGeneratedIntegrations,
+  validateImplementationUnit,
+} from "../services/implementation/verification";
+import { WixCliService, type WixService } from "../services/wix";
+import { triggeredEmailsDashboardUrl } from "../services/wix/dashboard-links";
+import {
+  normalizeCapabilitySdkPackages,
+  requiredArchitectureSdkPackages,
+  requiredSpecificationAppPermissions,
+} from "../services/wix/sdk-package-registry";
 import { LocalWorkspace, type Workspace } from "../workspace";
 import type { StageHandler } from "./types.js";
 
@@ -45,21 +60,78 @@ function configurationEnvironmentName(key: string) {
     .toUpperCase();
 }
 
-function requiredWorkflowSetup(specification: ReturnType<typeof parseProjectSpecification>) {
-  return specification.infrastructure.visitorWorkflows.flatMap((workflow) =>
-    workflow.actions.flatMap((action) =>
+function isDashboardConfiguration(
+  actionType: string,
+  configuration: { key: string; valueSource?: string | null },
+) {
+  // Wix's triggered-email recipient is the contact created from visitor input,
+  // while the sender lives inside the published template. The template ID is the
+  // only server-side dashboard value for this action.
+  if (actionType === "sendTriggeredEmail") {
+    return (
+      configuration.key === "triggeredEmailTemplateId" &&
+      (configuration.valueSource === "wixDashboard" || !configuration.valueSource)
+    );
+  }
+  if (configuration.valueSource) return configuration.valueSource === "wixDashboard";
+  return false;
+}
+
+export function requiredWorkflowSetup(
+  specification: ReturnType<typeof parseProjectSpecification>,
+  wixSiteId?: string,
+  architecture: ReturnType<typeof parseWixSolutionArchitecture> | null = null,
+) {
+  return specification.infrastructure.visitorWorkflows.flatMap((workflow) => {
+    const triggeredEmail = architecture?.journeySolutions.find(
+      (journey) => journey.journeyId === workflow.id,
+    )?.triggeredEmail;
+    const expectedFields =
+      triggeredEmail?.variables.map(({ name, description }) => ({ name, description })) ?? [];
+
+    return workflow.actions.flatMap((action) =>
       action.requiresManualSetup
-        ? action.requiredConfiguration.map((configuration) => ({
-            title: `Configure ${configuration.key} for ${workflow.name}`,
-            description: [
-              configuration.description,
-              `Save the value in the Wix site's server-side environment settings as ${configurationEnvironmentName(configuration.key)}, then mark this action complete.`,
-            ].join(" "),
-            blocking: true as const,
-          }))
+        ? action.requiredConfiguration
+            .filter((configuration) => isDashboardConfiguration(action.type, configuration))
+            .map((configuration) => {
+              const isTriggeredEmail = action.type === "sendTriggeredEmail";
+              return {
+                taskKey: `${workflow.id}:${configuration.key}`,
+                title: isTriggeredEmail
+                  ? "Create the triggered email"
+                  : `Finish Wix setup for ${workflow.name}`,
+                description: isTriggeredEmail
+                  ? "Create and publish the Wix Triggered Email used by this workflow. The factory sends it to the Wix contact created from the visitor's submitted email and supplies the page-specific values at runtime."
+                  : configuration.description,
+                wixDashboardUrl:
+                  isTriggeredEmail && wixSiteId
+                    ? triggeredEmailsDashboardUrl(wixSiteId)
+                    : undefined,
+                blocking: true as const,
+                configuration: {
+                  key: configuration.key,
+                  label: isTriggeredEmail ? "Published Email ID" : "Required Wix value",
+                  placeholder: isTriggeredEmail ? "For example: course_syllabus" : undefined,
+                  instructions: isTriggeredEmail
+                    ? [
+                        "Open Triggered Emails in Wix using the link below.",
+                        expectedFields.length > 0
+                          ? "Create each case-sensitive template variable listed below."
+                          : "This email does not use custom template variables.",
+                        "Set and verify the sender inside the email, then publish it.",
+                        "Copy the published Email ID and paste it below.",
+                      ]
+                    : [
+                        "Complete the required setting in this site's Wix dashboard.",
+                        "Copy the resulting value and paste it below.",
+                      ],
+                  expectedFields: isTriggeredEmail ? expectedFields : undefined,
+                },
+              };
+            })
         : [],
-    ),
-  );
+    );
+  });
 }
 
 async function optionalFile(workspace: Workspace, filePath: string) {
@@ -125,118 +197,6 @@ async function materializeDesign(
   return { screens, externalMediaUrls: [...externalMediaUrls] };
 }
 
-async function validateGeneratedIntegrations(
-  workspace: Workspace,
-  resources: WixSiteResources,
-  specification: ReturnType<typeof parseProjectSpecification>,
-) {
-  const sourceFiles = (await workspace.glob("src/**/*")).filter((file) =>
-    /\.(astro|js|jsx|ts|tsx)$/.test(file),
-  );
-  const sources = await Promise.all(
-    sourceFiles.map(async (file) => ({ file, content: await workspace.readFile(file) })),
-  );
-  const combined = sources.map((source) => source.content).join("\n");
-  const visibleSources = sources
-    .filter(({ file }) => /\.(astro|jsx|tsx)$/.test(file) && !file.includes("/api/"))
-    .map(({ content }) => content)
-    .join("\n");
-
-  if (combined.includes("googleusercontent.com")) {
-    throw new Error("Generated site still hotlinks temporary Google design images");
-  }
-  const placeholderMatch = visibleSources.match(
-    /(?:not configured yet|awaiting (?:wix )?configuration|configuration is missing|contact .* for (?:a|your) copy)/i,
-  );
-  if (placeholderMatch) {
-    throw new Error(
-      `Generated site replaced required behavior with a placeholder message: ${placeholderMatch[0]}`,
-    );
-  }
-  const inlineSubmitHandler = sources.find(
-    ({ file, content }) =>
-      file.endsWith(".astro") &&
-      /<script(?:\s|>)/.test(content) &&
-      /addEventListener\(\s*["']submit["']/.test(content),
-  );
-  if (inlineSubmitHandler) {
-    throw new Error(
-      `Generated business form in ${inlineSubmitHandler.file} uses an inline submit script instead of a typed interactive component`,
-    );
-  }
-  if (resources.cmsCollections.length > 0 && !combined.includes("@wix/wix-data-items-sdk")) {
-    throw new Error("Generated site does not connect to Wix CMS");
-  }
-  if (resources.cmsCollections.length > 0 && !combined.includes("items.query")) {
-    throw new Error("Generated site imports Wix CMS but never queries it");
-  }
-  for (const collection of resources.cmsCollections) {
-    const collectionLiteral = new RegExp(
-      `[\\"']${collection.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\"']`,
-    );
-    if (!collectionLiteral.test(combined)) {
-      throw new Error(`Generated site does not query the ${collection.displayName} CMS collection`);
-    }
-    const fixtureName = collection.id.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const fixture = sourceFiles.find((file) => {
-      const basename =
-        file
-          .split("/")
-          .at(-1)
-          ?.replace(/\.[^.]+$/, "")
-          .toLowerCase() ?? "";
-      return file.startsWith("src/data/") && basename.replace(/[^a-z0-9]/g, "") === fixtureName;
-    });
-    if (fixture) {
-      throw new Error(
-        `Generated site replaced the ${collection.displayName} CMS collection with ${fixture}`,
-      );
-    }
-  }
-
-  if (resources.forms.length > 0) {
-    if (!combined.includes("@wix/forms")) {
-      throw new Error("Generated site contains forms but does not connect them to Wix Forms");
-    }
-    if (!combined.includes("submissions.createSubmission")) {
-      throw new Error("Generated site forms do not save submissions to Wix");
-    }
-    if (!combined.includes("client:load")) {
-      throw new Error("Generated site forms are not interactive in the browser");
-    }
-  }
-
-  const workflowActions = new Set(
-    specification.infrastructure.visitorWorkflows.flatMap((workflow) =>
-      workflow.actions.map((action) => action.type),
-    ),
-  );
-  const requiresCustomContactCapture =
-    resources.formsMode === "customCrm" && workflowActions.has("saveFormSubmission");
-  if (
-    (workflowActions.has("createOrUpdateContact") || requiresCustomContactCapture) &&
-    !combined.includes("appendOrCreateContact")
-  ) {
-    throw new Error("Generated site does not create or update the visitor's Wix contact");
-  }
-  if (workflowActions.has("sendTriggeredEmail") && !combined.includes("emailContact")) {
-    throw new Error("Generated site does not send the required triggered email");
-  }
-}
-
-async function formatGeneratedSource(workspace: Workspace) {
-  const result = await workspace.exec("pnpm", [
-    "exec",
-    "prettier",
-    "--plugin=prettier-plugin-astro",
-    "--write",
-    "src/**/*.{astro,css,js,jsx,json,ts,tsx}",
-  ]);
-  if (result.exitCode !== 0) {
-    throw new Error(result.stderr || result.stdout || "Could not format the generated site files");
-  }
-}
-
 export const generateCode: StageHandler = {
   stage: "GeneratingCode",
 
@@ -264,21 +224,30 @@ export const generateCode: StageHandler = {
       ? BusinessRequirements.parse(requirementsArtifact.data)
       : null;
     const wixCapabilitySnapshot = capabilityArtifact
-      ? WixCapabilitySnapshot.parse(capabilityArtifact.data)
+      ? normalizeCapabilitySdkPackages(WixCapabilitySnapshot.parse(capabilityArtifact.data))
       : null;
     const wixSolutionArchitecture = architectureArtifact
-      ? WixSolutionArchitecture.parse(architectureArtifact.data)
+      ? parseWixSolutionArchitecture(architectureArtifact.data)
       : null;
-    const requiredSetup = requiredWorkflowSetup(specification);
+    const requiredSetup = requiredWorkflowSetup(
+      specification,
+      ctx.wix?.siteId,
+      wixSolutionArchitecture,
+    );
+    const checklistKey = hashInputs({
+      specificationArtifactId: specificationArtifact.id,
+      tasks: requiredSetup,
+    });
+    await ctx.store.activateManualTaskChecklist(ctx.projectId, checklistKey);
     if (requiredSetup.length > 0) {
-      const existingTasks = await ctx.store.getManualTaskStatuses(ctx.projectId);
-      const completedTitles = new Set(
-        existingTasks.filter((task) => task.completed).map((task) => task.title),
+      const existingTasks = await ctx.store.getManualTaskStatuses(ctx.projectId, checklistKey);
+      const completedTaskKeys = new Set(
+        existingTasks.filter((task) => task.completed).map((task) => task.taskKey),
       );
-      const incompleteSetup = requiredSetup.filter((task) => !completedTitles.has(task.title));
+      const incompleteSetup = requiredSetup.filter((task) => !completedTaskKeys.has(task.taskKey));
       if (incompleteSetup.length > 0) {
         await ctx.progress(8, "Waiting for required Wix setup");
-        return { kind: "manualTasks", tasks: incompleteSetup };
+        return { kind: "manualTasks", checklistKey, tasks: incompleteSetup };
       }
     }
     const change = await ctx.store.nextQueuedChangeRequest(ctx.projectId);
@@ -303,13 +272,11 @@ export const generateCode: StageHandler = {
     const baseRevision = baseRevisionResult.stdout.trim();
 
     if (requiredSetup.length > 0) {
-      const completedSetup = await ctx.store.getManualTaskStatuses(ctx.projectId);
+      const completedSetup = await ctx.store.getManualTaskStatuses(ctx.projectId, checklistKey);
       const environment = Object.fromEntries(
         completedSetup.flatMap((task) => {
-          const match = task.title.match(/^Configure (\S+) for /);
-          const key = match?.[1];
-          return task.completed && task.configurationValue && key
-            ? [[configurationEnvironmentName(key), task.configurationValue]]
+          return task.completed && task.configurationValue && task.configurationKey
+            ? [[configurationEnvironmentName(task.configurationKey), task.configurationValue]]
             : [];
         }),
       );
@@ -319,9 +286,21 @@ export const generateCode: StageHandler = {
     }
 
     await prepareRepositoryInstructions(workspace);
+    wixService ??= new WixCliService();
+    await wixService.ensureSdkPackages(
+      wixCapabilitySnapshot
+        ? requiredArchitectureSdkPackages(wixCapabilitySnapshot, wixSolutionArchitecture)
+        : [],
+      workspace,
+      (message) => ctx.progress(11, message),
+    );
+    await wixService.ensureAppPermissions(
+      requiredSpecificationAppPermissions(specification),
+      workspace,
+      (message) => ctx.progress(15, message),
+    );
     await workspace.remove(".factory/context");
     const { screens, externalMediaUrls } = await materializeDesign(ctx, workspace, design);
-    wixService ??= new WixCliService();
     await ctx.log("Preparing Wix CMS and site media", {
       kind: "stage-progress",
       label: "Preparing Wix CMS and site media",
@@ -361,33 +340,154 @@ export const generateCode: StageHandler = {
       percent: 45,
     });
 
-    const task = change
-      ? change.description
-      : "Implement every route in the approved specification and match all supplied desktop designs. Build the complete initial Wix Headless website; preserve the scaffold and wire required Wix business solutions.";
-    codeGenerator ??= new OpenAICodexGenerator();
-    let generated = await codeGenerator.build(
-      { task, specification, screens },
-      workspace,
-      (label) => ctx.log(label, { kind: "stage-progress", label, percent: 50 }),
+    const proposedPlan = createImplementationPlan({
+      specification,
+      architecture: wixSolutionArchitecture,
+      screens,
+      specificationVersion: specificationArtifact.version,
+      designVersion: designArtifact.version,
+      change,
+    });
+    const latestPlanArtifact = await ctx.store.getLatestArtifact(
+      ctx.projectId,
+      "implementationPlan",
     );
+    const savedPlan = WebsiteImplementationPlan.safeParse(latestPlanArtifact?.data);
+    const implementationPlan: ImplementationPlan =
+      savedPlan.success && savedPlan.data.planHash === proposedPlan.planHash
+        ? savedPlan.data
+        : proposedPlan;
+    if (!savedPlan.success || savedPlan.data.planHash !== proposedPlan.planHash) {
+      await ctx.emitArtifact("implementationPlan", implementationPlan, {
+        promptHash: "",
+        inputsHash: implementationPlan.planHash,
+      });
+    }
+
+    const latestBuildReport = await ctx.store.getLatestArtifact(ctx.projectId, "buildReport");
+    const latestReport = ImplementationUnitCheckpoint.safeParse(latestBuildReport?.data);
+    const resumesVerifiedUnits =
+      latestReport.success && latestReport.data.planHash === implementationPlan.planHash;
+    const firstUnit = resumesVerifiedUnits ? latestReport.data.unitIndex + 1 : 0;
+    const initialBaseRevision =
+      resumesVerifiedUnits && latestReport.data.initialBaseRevision
+        ? latestReport.data.initialBaseRevision
+        : baseRevision;
+    const codePrompt = loadPrompt("code");
+    const models = new Set<string>();
+    if (resumesVerifiedUnits) models.add(latestReport.data.model);
+    const unitSummaries: Array<{ id: string; summary: string; revision: string }> = [];
+    codeGenerator ??= new OpenAICodexGenerator();
+
+    if (firstUnit > 0) {
+      await ctx.progress(
+        46,
+        `Resuming after ${firstUnit} verified ${firstUnit === 1 ? "part" : "parts"}`,
+      );
+    }
+
+    for (let unitIndex = firstUnit; unitIndex < implementationPlan.units.length; unitIndex += 1) {
+      const unit = implementationPlan.units[unitIndex]!;
+      const unitScreens = screensForUnit(unit, screens);
+      const startPercent = 46 + Math.round((unitIndex / implementationPlan.units.length) * 39);
+      const verifiedPercent =
+        46 + Math.round(((unitIndex + 1) / implementationPlan.units.length) * 39);
+      let generated: Awaited<ReturnType<CodeGenerator["build"]>> | null = null;
+      let unitError: Error | null = null;
+
+      for (let pass = 0; pass < 2; pass += 1) {
+        const label =
+          pass === 0
+            ? `Building ${unit.title} · ${unitIndex + 1} of ${implementationPlan.units.length}`
+            : `Repairing ${unit.title} · ${unitIndex + 1} of ${implementationPlan.units.length}`;
+        await ctx.progress(startPercent, label);
+        generated = await codeGenerator.build(
+          {
+            task:
+              pass === 0
+                ? unit.task
+                : [
+                    `Repair only the “${unit.title}” implementation unit.`,
+                    `The factory verification failed: ${unitError?.message ?? "unknown failure"}`,
+                    `Original unit task: ${unit.task}`,
+                    "Keep previously verified units intact and satisfy every acceptance criterion before finishing.",
+                  ].join("\n"),
+            specification,
+            screens: unitScreens,
+            unit,
+          },
+          workspace,
+          (message) => ctx.progress(startPercent, message),
+        );
+        models.add(generated.model);
+
+        await ctx.progress(
+          Math.min(verifiedPercent, startPercent + 3),
+          `Verifying ${unit.title} · ${unitIndex + 1} of ${implementationPlan.units.length}`,
+        );
+        await formatGeneratedSource(workspace);
+        try {
+          await validateImplementationUnit(workspace, wixResources, specification, unit);
+          await wixService.build(workspace);
+          unitError = null;
+          break;
+        } catch (error) {
+          unitError = error instanceof Error ? error : new Error(String(error));
+          if (pass === 1) throw unitError;
+        }
+      }
+
+      if (!generated) throw new Error(`The ${unit.title} implementation did not run`);
+      const revision = await githubService.commitAndPush(
+        workspace,
+        `feat: implement ${unit.title}`,
+      );
+      unitSummaries.push({ id: unit.id, summary: generated.summary, revision });
+      await ctx.emitArtifact(
+        "buildReport",
+        {
+          kind: "implementationUnit",
+          ok: true,
+          planHash: implementationPlan.planHash,
+          unitIndex,
+          unitId: unit.id,
+          unitTitle: unit.title,
+          summary: generated.summary,
+          model: generated.model,
+          initialBaseRevision,
+          revision,
+          checks: ["source validation", "Wix production build"],
+        },
+        {
+          promptHash: generated.promptHash,
+          inputsHash: hashInputs({ implementationPlan, unit, initialBaseRevision }),
+        },
+      );
+      await ctx.progress(
+        verifiedPercent,
+        `Verified ${unit.title} · ${unitIndex + 1} of ${implementationPlan.units.length}`,
+      );
+    }
+
+    let finalGenerated: Awaited<ReturnType<CodeGenerator["build"]>> | null = null;
     let validationError: Error | null = null;
     for (let pass = 0; pass < 2; pass += 1) {
       await ctx.progress(
-        85 + pass * 4,
-        pass === 0 ? "Reviewing the implementation" : "Reviewing the fixes",
+        88 + pass * 3,
+        pass === 0 ? "Checking the complete website" : "Checking the final repairs",
       );
       await formatGeneratedSource(workspace);
       try {
         await validateGeneratedIntegrations(workspace, wixResources, specification);
-        await ctx.progress(90, "Building the Wix site");
+        await ctx.progress(91, "Building the complete Wix site");
         await wixService.build(workspace);
         validationError = null;
         break;
       } catch (error) {
         validationError = error instanceof Error ? error : new Error(String(error));
         if (pass === 1) break;
-        await ctx.progress(88, "Fixing incomplete website behavior");
-        generated = await codeGenerator.build(
+        await ctx.progress(89, "Repairing the complete website");
+        finalGenerated = await codeGenerator.build(
           {
             task: [
               "Audit and repair the implementation. Do not redesign it.",
@@ -400,8 +500,9 @@ export const generateCode: StageHandler = {
             screens,
           },
           workspace,
-          (label) => ctx.progress(88, label),
+          (label) => ctx.progress(89, label),
         );
+        models.add(finalGenerated.model);
       }
     }
     if (validationError) throw validationError;
@@ -413,10 +514,10 @@ export const generateCode: StageHandler = {
     });
     const revision = await githubService.commitAndPush(
       workspace,
-      change ? "feat: apply requested website change" : "feat: implement approved website",
+      change ? "fix: complete requested website change" : "fix: complete website integration",
     );
     const inputs = {
-      task,
+      implementationPlan,
       specificationArtifact: {
         id: specificationArtifact.id,
         version: specificationArtifact.version,
@@ -427,25 +528,31 @@ export const generateCode: StageHandler = {
         version: designArtifact.version,
         data: design,
       },
-      baseRevision,
+      baseRevision: initialBaseRevision,
       repository: { owner: github.owner, name: github.name },
-      model: generated.model,
+      models: [...models],
       wixResources,
     };
     await ctx.emitArtifact(
       "buildReport",
       {
+        kind: "implementationComplete",
         ok: true,
-        summary: generated.summary,
-        model: generated.model,
-        baseRevision,
+        summary:
+          finalGenerated?.summary ??
+          `${implementationPlan.units.length} implementation units completed and verified.`,
+        model: finalGenerated?.model ?? [...models].at(-1) ?? "unknown",
+        baseRevision: initialBaseRevision,
         revision,
         repository: github.htmlUrl,
         specificationVersion: specificationArtifact.version,
         designVersion: designArtifact.version,
         changeRequestId: change?.id ?? null,
+        planHash: implementationPlan.planHash,
+        units: implementationPlan.units.map((unit) => unit.id),
+        completedThisRun: unitSummaries,
       },
-      { promptHash: generated.promptHash, inputsHash: hashInputs(inputs) },
+      { promptHash: finalGenerated?.promptHash ?? codePrompt.hash, inputsHash: hashInputs(inputs) },
     );
 
     if (change) await ctx.store.completeChangeRequest(change.id, "done");

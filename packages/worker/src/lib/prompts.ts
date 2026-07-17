@@ -33,6 +33,7 @@ export type PromptName =
   | "screen-change"
   | "code"
   | "fix"
+  | "qa-repair"
   | "site-agents";
 
 export interface Prompt {

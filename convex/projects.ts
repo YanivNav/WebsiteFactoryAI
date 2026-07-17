@@ -361,16 +361,27 @@ export const detail = query({
       ]);
 
     const artifactStorageIds = artifacts.flatMap((artifact) => {
-      if (artifact.type !== "design") return [];
-      const screens =
-        (
-          artifact.data as {
-            screens?: Array<{ htmlStorageId?: string; screenshotStorageId?: string }>;
-          }
-        ).screens ?? [];
-      return screens.flatMap(
-        (screen) => [screen.htmlStorageId, screen.screenshotStorageId].filter(Boolean) as string[],
-      );
+      if (artifact.type === "design") {
+        const screens =
+          (
+            artifact.data as {
+              screens?: Array<{ htmlStorageId?: string; screenshotStorageId?: string }>;
+            }
+          ).screens ?? [];
+        return screens.flatMap(
+          (screen) =>
+            [screen.htmlStorageId, screen.screenshotStorageId].filter(Boolean) as string[],
+        );
+      }
+      if (artifact.type === "websiteQaReport") {
+        return (
+          (artifact.data as { checks?: Array<{ screenshotStorageId?: string | null }> }).checks ??
+          []
+        )
+          .map((check) => check.screenshotStorageId)
+          .filter(Boolean) as string[];
+      }
+      return [];
     });
     const storageIds = [...new Set(artifactStorageIds)];
     const assetUrls = Object.fromEntries(

@@ -36,6 +36,7 @@ export interface StageContext {
   };
   attempts: number;
   planningCycle?: number;
+  wix?: { projectId?: string; siteId: string; appId: string };
   store: ProjectStore;
 
   /** Structured logging. Never rely on raw AI messages for state — log explicitly. */
@@ -45,7 +46,11 @@ export interface StageContext {
   progress(percent: number, label: string): Promise<void>;
 
   /** Append-only. Emitting a `specification` also opens the review gate for it. */
-  emitArtifact(type: ArtifactTypeName, data: unknown, provenance: Provenance): Promise<void>;
+  emitArtifact(
+    type: ArtifactTypeName,
+    data: unknown,
+    provenance: Provenance,
+  ): Promise<{ id: string; version: number }>;
 }
 
 /**
@@ -70,10 +75,13 @@ export type ArtifactTypeName =
   | "businessRequirements"
   | "wixCapabilitySnapshot"
   | "wixSolutionArchitecture"
+  | "implementationPlan"
   | "specification"
   | "design"
   | "buildReport"
   | "preview"
+  | "websiteQaPlan"
+  | "websiteQaReport"
   | "releaseReport";
 
 export type StageResult =
@@ -90,18 +98,35 @@ export type StageResult =
       github: GitHubProject;
     }
   | { kind: "codeGenerated"; github: GitHubProject }
+  /** Browser QA passed; atomically expose the tested preview for final review. */
+  | {
+      kind: "websiteQaCompleted";
+      previewArtifactId: string;
+      previewVersion: number;
+      previewUrl: string;
+    }
   /** Blocked on a human. Raises tasks and parks the project in WaitingForManualActions. */
-  | { kind: "manualTasks"; tasks: ManualTaskDraft[] }
+  | { kind: "manualTasks"; checklistKey: string; tasks: ManualTaskDraft[] }
   /** Failed. The lease is released and the stage becomes leasable again. */
   | { kind: "failed"; error: string; retryable: boolean };
 
 export interface ManualTaskDraft {
+  /** Stable within one checklist so retries preserve completion without matching prose. */
+  taskKey: string;
   title: string;
   description: string;
   /** Deep link into the exact Wix dashboard page. The user knows the Wix dashboard
    *  cold — send them somewhere they recognise, never "run this command". */
   wixDashboardUrl?: string;
   blocking: boolean;
+  /** Present only when the task must collect a real dashboard-created runtime value. */
+  configuration?: {
+    key: string;
+    label: string;
+    placeholder?: string;
+    instructions: string[];
+    expectedFields?: Array<{ name: string; description: string }>;
+  };
 }
 
 export interface StageHandler {

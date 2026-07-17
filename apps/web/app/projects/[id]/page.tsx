@@ -21,6 +21,7 @@ const CHECKLIST_STAGES = new Set<Stage>([
   "WaitingForCodeReview",
   "RunningChecks",
   "GeneratingPreview",
+  "RunningWebsiteQA",
   "WaitingForFinalApproval",
   "Publishing",
   "Completed",
@@ -96,7 +97,6 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     onComplete={actions.completeTask}
                     projectTitle={detail.project.title}
                     tasks={detail.manualTasks}
-                    wixSiteId={detail.project.wix?.siteId}
                   />
                 </div>
               )}
@@ -144,6 +144,7 @@ function Workspace({
         review={review}
         solutionArchitecture={detail.solutionArchitecture}
         specificationVersions={detail.specificationVersions}
+        websiteQaReport={detail.websiteQaReport}
       />
     );
   }
@@ -161,7 +162,6 @@ function Workspace({
       <ManualActions
         onComplete={actions.completeTask}
         projectTitle={detail.project.title}
-        wixSiteId={detail.project.wix?.siteId}
         tasks={detail.manualTasks}
       />
     );

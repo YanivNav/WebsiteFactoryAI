@@ -11,12 +11,20 @@ export interface GitHubRepository {
 }
 
 export interface GitHubService {
+  /** Restore the canonical repository into a disposable/missing local cache. */
+  restoreExistingRepository(input: {
+    projectId: string;
+    projectTitle: string;
+    workspace: Workspace;
+  }): Promise<GitHubRepository | null>;
   ensureRepository(input: {
     projectId: string;
     projectTitle: string;
     workspace: Workspace;
     restoreInterruptedAttempt?: boolean;
   }): Promise<GitHubRepository>;
+  /** Fast-forward the warm workspace to the canonical main branch before deployment. */
+  syncCanonical(workspace: Workspace): Promise<string>;
   commitAndPush(workspace: Workspace, message: string): Promise<string>;
 }
 
@@ -73,6 +81,43 @@ function isNotFound(error: unknown) {
 }
 
 export class GitHubRestService implements GitHubService {
+  async restoreExistingRepository({
+    projectId,
+    projectTitle,
+    workspace,
+  }: {
+    projectId: string;
+    projectTitle: string;
+    workspace: Workspace;
+  }): Promise<GitHubRepository | null> {
+    const { token, organization } = credentials();
+    const name = repositoryName(projectTitle, projectId);
+    const octokit = githubClient(token);
+    let repository: GitHubRepository;
+    try {
+      const { data } = await octokit.repos.get({ owner: organization, repo: name });
+      repository = parseRepository(data);
+      // An empty repository has no canonical branch to restore. Let the normal
+      // scaffold → initial commit path populate it instead.
+      await octokit.repos.getBranch({ owner: organization, repo: name, branch: "main" });
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+
+    const authorization = gitAuthorization(token);
+    await workspace.materialize(projectId, {
+      cloneUrl: repository.cloneUrl,
+      authorization,
+    });
+    await workspace.setRemote(repository.cloneUrl);
+    // The workspace is a disposable cache. If it was recreated as a fresh Wix
+    // scaffold, its unrelated local history must not be merged into the canonical
+    // GitHub project; replace the cache with origin/main instead.
+    await workspace.restoreFromRemote(authorization);
+    return { ...repository, defaultBranch: "main" };
+  }
+
   async ensureRepository({
     projectId,
     projectTitle,
@@ -86,15 +131,7 @@ export class GitHubRestService implements GitHubService {
   }): Promise<GitHubRepository> {
     const { token, organization } = credentials();
     const name = repositoryName(projectTitle, projectId);
-    const octokit = new Octokit({
-      auth: token,
-      userAgent: "website-factory-worker",
-      request: {
-        headers: {
-          "x-github-api-version": "2026-03-10",
-        },
-      },
-    });
+    const octokit = githubClient(token);
     let repository: GitHubRepository;
     try {
       const { data } = await octokit.repos.get({
@@ -128,6 +165,28 @@ export class GitHubRestService implements GitHubService {
     await workspace.push(gitAuthorization(token));
     return revision;
   }
+
+  async syncCanonical(workspace: Workspace): Promise<string> {
+    const { token } = credentials();
+    await workspace.sync(gitAuthorization(token));
+    const revision = await workspace.exec("git", ["rev-parse", "HEAD"]);
+    if (revision.exitCode !== 0) {
+      throw new Error(revision.stderr || "Could not read the website version before previewing");
+    }
+    return revision.stdout.trim();
+  }
+}
+
+function githubClient(token: string) {
+  return new Octokit({
+    auth: token,
+    userAgent: "website-factory-worker",
+    request: {
+      headers: {
+        "x-github-api-version": "2026-03-10",
+      },
+    },
+  });
 }
 
 function gitAuthorization(token: string) {

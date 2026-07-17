@@ -17,6 +17,7 @@ import { provisionWix } from "./provisionWix.js";
 import { generateCode } from "./generateCode.js";
 import { runChecks } from "./runChecks.js";
 import { generatePreview } from "./generatePreview.js";
+import { runWebsiteQa } from "./runWebsiteQa.js";
 import { publish } from "./publish.js";
 
 export const HANDLERS: Partial<Record<Stage, StageHandler>> = {
@@ -27,6 +28,7 @@ export const HANDLERS: Partial<Record<Stage, StageHandler>> = {
   GeneratingCode: generateCode,
   RunningChecks: runChecks,
   GeneratingPreview: generatePreview,
+  RunningWebsiteQA: runWebsiteQa,
   Publishing: publish,
 };
 

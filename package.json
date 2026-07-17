@@ -14,6 +14,7 @@
     "typecheck": "pnpm -r --no-bail typecheck",
     "lint": "pnpm --filter @factory/web lint",
     "test": "pnpm -r --if-present test",
+    "qa:install-browser": "pnpm --filter @factory/worker qa:install-browser",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

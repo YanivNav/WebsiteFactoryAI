@@ -1,7 +1,12 @@
 "use client";
 
 import { Check } from "lucide-react";
-import type { ReviewFeedback, SolutionArchitecture, Specification } from "@factory/shared";
+import type {
+  QaReport,
+  ReviewFeedback,
+  SolutionArchitecture,
+  Specification,
+} from "@factory/shared";
 import type { ArtifactVersion, PendingReview } from "@/data/useProjectDetail";
 import type { Design } from "@factory/shared";
 import { DesignReview } from "./DesignReview";
@@ -29,6 +34,7 @@ export function ReviewWorkspace({
   review,
   solutionArchitecture,
   specificationVersions,
+  websiteQaReport,
 }: {
   assetUrls: Record<string, string | null>;
   designVersions: Array<ArtifactVersion<Design>>;
@@ -39,6 +45,7 @@ export function ReviewWorkspace({
   review: PendingReview;
   solutionArchitecture?: SolutionArchitecture;
   specificationVersions: Array<ArtifactVersion<Specification>>;
+  websiteQaReport?: QaReport;
 }) {
   return (
     <div className="space-y-5">
@@ -62,9 +69,11 @@ export function ReviewWorkspace({
         />
       ) : (
         <PreviewReview
+          assetUrls={assetUrls}
           onApprove={onApprove}
           onRequestChanges={onRequestChanges}
           project={project}
+          qaReport={websiteQaReport}
           review={review}
         />
       )}

@@ -78,6 +78,7 @@ export class LocalRunner implements JobRunner {
         settings: project.settings,
         attempts: project.attempts,
         planningCycle: project.planningCycle ?? 1,
+        wix: project.wix,
         store: this.store,
         log: async (message, data) => {
           console.error(`${prefix} ${message}`);
@@ -102,7 +103,7 @@ export class LocalRunner implements JobRunner {
         },
         emitArtifact: async (type, data, provenance) => {
           console.error(`${prefix} storing ${type}`);
-          await this.store.appendArtifact({
+          const artifact = await this.store.appendArtifact({
             projectId: project.id,
             type,
             data,
@@ -113,6 +114,7 @@ export class LocalRunner implements JobRunner {
             planningCycle: project.planningCycle ?? 1,
           });
           console.error(`${prefix} stored ${type}`);
+          return { id: artifact.id, version: artifact.version };
         },
       };
 
@@ -159,9 +161,17 @@ export class LocalRunner implements JobRunner {
           github: result.github,
         });
         console.error(`${prefix} completed → ${next}`);
+      } else if (result.kind === "websiteQaCompleted") {
+        const next = nextStage(project.currentStage, project.settings.mode);
+        await this.store.commitResult(project.id, this.workerId, {
+          ...result,
+          next,
+        });
+        console.error(`${prefix} completed → ${next}`);
       } else if (result.kind === "manualTasks") {
         await this.store.commitResult(project.id, this.workerId, {
           kind: "manualTasks",
+          checklistKey: result.checklistKey,
           tasks: result.tasks,
         });
         console.error(
