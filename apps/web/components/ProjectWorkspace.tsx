@@ -3,16 +3,16 @@
 import { Check, CircleAlert, LoaderCircle } from "lucide-react";
 import { isWaitingStage, STAGE_LABELS } from "@factory/shared";
 import type { ProjectDetail } from "@/data/useProjectDetail";
+import {api} from "@convex/_generated/api";
+import {useMutation} from "convex/react";
 
-export function WorkingWorkspace({
-  detail,
-  onContinue,
-  onRetry,
+export function ProjectWorkspace({
+  detail
 }: {
-  detail: ProjectDetail;
-  onContinue: () => Promise<unknown>;
-  onRetry: () => Promise<unknown>;
+  detail: ProjectDetail
 }) {
+  const continueFromGate = useMutation(api.projects.continueFromGate);
+  const retryCurrentStage = useMutation(api.projects.retryCurrentStage);
   const { project, stage, statusMessage } = detail;
   const completed = stage === "Completed";
   const waiting = isWaitingStage(stage) && !completed;
@@ -22,7 +22,7 @@ export function WorkingWorkspace({
       <div className="flex items-start gap-4">
         <StatusIcon completed={completed} failed={project.status === "failed"} waiting={waiting} />
         <div className="min-w-0 flex-1">
-          <p className="text-primary text-[10px] font-bold tracking-[0.1em] uppercase">
+          <p className="text-primary text-[10px] font-bold tracking-widest uppercase">
             {project.status === "failed"
               ? "Worker stopped"
               : completed
@@ -32,35 +32,7 @@ export function WorkingWorkspace({
                   : "Worker active"}
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{STAGE_LABELS[stage]}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-5 text-[#596170]">
-            {project.status === "failed"
-              ? (project.lastError ?? "The worker could not complete this placeholder stage.")
-              : completed
-                ? "The architecture walkthrough is complete. Real stage behavior has not been implemented on this branch."
-                : waiting
-                  ? "This gate is an architectural placeholder. Continue when you are ready to exercise the next worker stage."
-                  : statusMessage}
-          </p>
-          <div className="mt-5 flex gap-3">
-            {waiting && (
-              <button
-                className="bg-primary rounded px-4 py-2 text-xs font-semibold text-white hover:bg-[#064aa0]"
-                onClick={() => void onContinue()}
-                type="button"
-              >
-                Continue
-              </button>
-            )}
-            {project.status === "failed" && (
-              <button
-                className="rounded bg-[#a82922] px-4 py-2 text-xs font-semibold text-white hover:bg-[#8f211c]"
-                onClick={() => void onRetry()}
-                type="button"
-              >
-                Retry worker stage
-              </button>
-            )}
-          </div>
+          
         </div>
       </div>
     </section>

@@ -97,3 +97,14 @@ export const STAGE_LABELS: Record<Stage, string> = {
 export type ProjectMode = "simple" | "developer";
 
 export const DEFAULT_MODE: ProjectMode = "simple";
+
+export function nextStage(current: Stage): Stage {
+  if (current === "Completed") return "Completed";
+
+  const index = STAGES.indexOf(current);
+  if (index === -1) {
+    throw new Error(`Unknown stage: ${current}`);
+  }
+
+  return STAGES[index + 1] ?? 'Completed';
+}

@@ -4,7 +4,7 @@ import { Check, LoaderCircle } from "lucide-react";
 import { isWaitingStage, STAGES, type Stage } from "@factory/shared";
 import { PROJECT_PHASES } from "@/helpers/projectPhases";
 
-const RAIL_STEPS = [
+const STEPS = [
   ...PROJECT_PHASES.map((phase) => ({
     label: phase.label,
     stageIndex: STAGES.indexOf(phase.startStage),
@@ -13,7 +13,7 @@ const RAIL_STEPS = [
 ];
 
 /** Read-only lifecycle timeline. Stage-specific controls belong in the main panel. */
-export function LifecycleRail({ stage }: { stage: Stage }) {
+export function LifecycleTimeline({ stage }: { stage: Stage }) {
   const current = STAGES.indexOf(stage);
 
   return (
@@ -24,8 +24,8 @@ export function LifecycleRail({ stage }: { stage: Stage }) {
       <div className="relative">
         <div className="absolute top-3 bottom-3 left-3 w-px bg-[#c2c6d6]" />
         <ol className="relative space-y-7">
-          {RAIL_STEPS.map((step, index) => {
-            const nextIndex = RAIL_STEPS[index + 1]?.stageIndex ?? STAGES.length;
+          {STEPS.map((step, index) => {
+            const nextIndex = STEPS[index + 1]?.stageIndex ?? STAGES.length;
             const active = current >= step.stageIndex && current < nextIndex;
             const complete = current >= nextIndex || stage === "Completed";
             return (

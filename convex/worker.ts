@@ -3,7 +3,8 @@ import { isRunnableStage, STAGES } from "@factory/shared";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation } from "./_generated/server";
-import { stageValidator } from "./schema";
+import {artifactTypeValidator, stageValidator} from "./schema";
+import {ARTIFACT_TYPES} from "../packages/shared/src/artifacts";
 
 const RUNNABLE_STAGES = STAGES.filter(isRunnableStage);
 
@@ -20,7 +21,6 @@ export const leaseNextRunnable = mutation({
       const project = candidates.find(
         (candidate) =>
           candidate.status === "active" &&
-          candidate.attempts < 3 &&
           (candidate.leaseWorkerId === undefined || (candidate.leaseExpiresAt ?? 0) < now),
       );
       if (!project) continue;
@@ -29,21 +29,12 @@ export const leaseNextRunnable = mutation({
         leaseWorkerId: workerId,
         leaseExpiresAt: now + ttlSeconds * 1000,
       });
-      await ctx.db.insert("stageRuns", {
-        projectId: project._id,
-        stage: project.currentStage,
-        attempt: project.attempts + 1,
-        status: "running",
-        startedAt: now,
-      });
 
       return {
         id: project._id,
         title: project.title,
         currentStage: project.currentStage,
-        brief: project.brief,
         settings: project.settings,
-        attempts: project.attempts,
       };
     }
 
@@ -60,58 +51,6 @@ export const renewLease = mutation({
   },
 });
 
-async function finishStageRun(
-  ctx: { db: any },
-  project: Doc<"projects">,
-  status: "succeeded" | "failed",
-  error?: string,
-) {
-  const runs = await ctx.db
-    .query("stageRuns")
-    .withIndex("by_project", (q: any) => q.eq("projectId", project._id))
-    .collect();
-  const run = runs.filter((candidate: Doc<"stageRuns">) => candidate.status === "running").pop();
-  if (run) await ctx.db.patch(run._id, { status, finishedAt: Date.now(), error });
-}
-
-export const commitResult = mutation({
-  args: {
-    projectId: v.id("projects"),
-    workerId: v.string(),
-    result: v.union(
-      v.object({ kind: v.literal("advance"), next: stageValidator }),
-      v.object({ kind: v.literal("failed"), error: v.string(), retryable: v.boolean() }),
-    ),
-  },
-  handler: async (ctx, { projectId, workerId, result }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("Project not found");
-    if (project.leaseWorkerId !== workerId) return;
-
-    const releaseLease = { leaseWorkerId: undefined, leaseExpiresAt: undefined };
-    if (result.kind === "advance") {
-      await finishStageRun(ctx, project, "succeeded");
-      await ctx.db.patch(projectId, {
-        ...releaseLease,
-        currentStage: result.next,
-        status: result.next === "Completed" ? "completed" : "active",
-        attempts: 0,
-        lastError: undefined,
-      });
-      return;
-    }
-
-    await finishStageRun(ctx, project, "failed", result.error);
-    const attempts = result.retryable ? project.attempts + 1 : 3;
-    await ctx.db.patch(projectId, {
-      ...releaseLease,
-      attempts,
-      lastError: result.error,
-      status: attempts >= 3 ? "failed" : "active",
-    });
-  },
-});
-
 export const appendLog = mutation({
   args: {
     projectId: v.id("projects"),
@@ -123,4 +62,29 @@ export const appendLog = mutation({
   handler: async (ctx, input) => {
     await ctx.db.insert("logs", input);
   },
+});
+
+export const addArtifact = mutation({
+  args: {
+    projectId: v.id('projects'),
+    type: artifactTypeValidator,
+    stage: stageValidator,
+    name: v.string(),
+    data: v.any(),
+    planningCycle: v.number()
+  },
+  handler: async (ctx, input) => {
+    const existing = await ctx.db.query('artifacts')
+      .withIndex('by_project_and_type', q => q.eq('projectId', input.projectId).eq('type', input.type))
+      .collect();
+
+    const version = existing.length + 1;
+    const artifactId = await ctx.db.insert('artifacts', {
+      ...input,
+      version,
+      assets: []
+    });
+
+    return {artifactId, version};
+  }
 });

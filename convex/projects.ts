@@ -1,7 +1,8 @@
 /** Dashboard-facing project CRUD and minimal waiting-gate controls. */
-import {isRunnableStage, isWaitingStage, nextStage, STAGES} from "@factory/shared";
-import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import {isRunnableStage, isWaitingStage, nextStage} from "@factory/shared";
+import {v} from "convex/values";
+import {mutation, query} from "./_generated/server";
+import {api} from "./_generated/api";
 
 const SINGLE_USER = "owner";
 
@@ -12,8 +13,18 @@ export const create = mutation({
       title,
       owner: SINGLE_USER,
       status: "active",
-      brief,
+      planningCycle: 0,
+      currentStage: 'Draft',
       settings: { mode: "simple", publishTarget: "wix-managed" },
+    });
+
+    await ctx.runMutation(api.worker.addArtifact, {
+      projectId,
+      type: 'brief',
+      name: 'Brief',
+      data: brief,
+      planningCycle: 0,
+      stage: 'Draft'
     });
 
     await ctx.db.insert("logs", {
@@ -35,10 +46,8 @@ export const start = mutation({
     if (project.currentStage !== "Draft") return;
 
     await ctx.db.patch(projectId, {
-      currentStage: nextStage("Draft", project.settings.mode),
-      status: "active",
-      attempts: 0,
-      lastError: undefined,
+      currentStage: nextStage("Draft"),
+      status: "active"
     });
   },
 });
@@ -54,7 +63,7 @@ export const continueFromGate = mutation({
     if (!project) throw new Error("Project not found");
     if (!isWaitingStage(project.currentStage) || project.currentStage === "Completed") return;
 
-    const next = nextStage(project.currentStage, project.settings.mode);
+    const next = nextStage(project.currentStage);
     await ctx.db.insert("logs", {
       projectId,
       stage: project.currentStage,
@@ -64,8 +73,6 @@ export const continueFromGate = mutation({
     await ctx.db.patch(projectId, {
       currentStage: next,
       status: "active",
-      attempts: 0,
-      lastError: undefined,
       leaseWorkerId: undefined,
       leaseExpiresAt: undefined,
     });
@@ -81,8 +88,6 @@ export const retryCurrentStage = mutation({
 
     await ctx.db.patch(projectId, {
       status: "active",
-      attempts: 0,
-      lastError: undefined,
       leaseWorkerId: undefined,
       leaseExpiresAt: undefined,
     });
@@ -109,6 +114,31 @@ export const detail = query({
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .order("desc")
       .take(20);
-    return { project, logs };
+
+    const artifacts = await ctx.db.query('artifacts')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .collect();
+
+    const storageIds = [...new Set(artifacts.flatMap(a => a.assets).map(a => a.storageId))];
+    const assetUrls = Object.fromEntries(
+      await Promise.all(
+        storageIds.map(async (storageId) => [
+          storageId,
+          await ctx.storage.getUrl(storageId)
+        ]),
+      ),
+    );
+
+    return {
+      project,
+      logs,
+      artifacts: artifacts.map(artifact => ({
+        ...artifact,
+        assets: artifact.assets.map(asset => ({
+          id: asset.id,
+          url: assetUrls[asset.storageId]
+        }))
+      }))
+    };
   },
 });

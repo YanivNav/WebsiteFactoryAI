@@ -17,9 +17,14 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {STAGES} from "@factory/shared";
+import {ARTIFACT_TYPES} from "../packages/shared/src/artifacts";
 
 export const stageValidator = v.union(
   ...STAGES.map(stage => v.literal(stage))
+);
+
+export const artifactTypeValidator = v.union(
+  ...ARTIFACT_TYPES.map(t => v.literal(t))
 );
 
 export default defineSchema({
@@ -28,7 +33,6 @@ export default defineSchema({
     owner: v.string(),
     status: v.union(v.literal("active"), v.literal("failed"), v.literal("completed")),
     currentStage: stageValidator,
-    brief: v.string(),
     settings: v.object({
       mode: v.union(v.literal("simple"), v.literal("developer")),
       publishTarget: v.union(v.literal("wix-managed"), v.literal("custom")),
@@ -69,14 +73,18 @@ export default defineSchema({
 
   artifacts: defineTable({
     projectId: v.id("projects"),
+    type: artifactTypeValidator,
     stage: stageValidator,
+    name: v.string(),
     planningCycle: v.number(),
     version: v.number(),
     data: v.any(),
-    storageId: v.optional(v.id("_storage")), // blobs never live inside documents
-    promptHash: v.string(),
-    inputsHash: v.string(),
-  }).index("by_project", ["projectId"]),
+    assets: v.array(v.object({
+      id: v.string(),
+      storageId: v.id('_storage')
+    }))
+  }).index("by_project", ["projectId"])
+    .index("by_project_and_type", ["projectId", "type"]),
 
   logs: defineTable({
     projectId: v.id("projects"),

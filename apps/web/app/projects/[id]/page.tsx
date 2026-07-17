@@ -1,18 +1,17 @@
 "use client";
 
-import { use } from "react";
-import { CircleAlert, LoaderCircle } from "lucide-react";
-import type { Id } from "@convex/_generated/dataModel";
-import { LifecycleRail } from "@/components/LifecycleRail";
-import { ProjectHeader } from "@/components/ProjectHeader";
-import { WorkingWorkspace } from "@/components/WorkingWorkspace";
-import { useProjectActions, useProjectDetail } from "@/data/useProjectDetail";
+import {use} from "react";
+import {CircleAlert, LoaderCircle} from "lucide-react";
+import type {Id} from "@convex/_generated/dataModel";
+import {LifecycleTimeline} from "@/components/LifecycleTimeline";
+import {ProjectHeader} from "@/components/ProjectHeader";
+import {ProjectWorkspace} from "@/components/ProjectWorkspace";
+import {useProjectDetail} from "@/data/useProjectDetail";
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const projectId = id as Id<"projects">;
   const result = useProjectDetail(projectId);
-  const actions = useProjectActions(projectId);
 
   if (result.status === "loading") {
     return (
@@ -34,14 +33,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     <div className="min-h-screen bg-[#f8f9fa]">
       <ProjectHeader projectTitle={detail.project.title} stage={detail.stage} />
       <div className="flex min-h-[calc(100vh-56px)]">
-        <LifecycleRail stage={detail.stage} />
+        <LifecycleTimeline stage={detail.stage} />
         <main className="min-w-0 flex-1 p-4 md:p-6">
           <div className="mx-auto max-w-5xl">
-            <WorkingWorkspace
-              detail={detail}
-              onContinue={actions.continueFromGate}
-              onRetry={actions.retryCurrentStage}
-            />
+            <ProjectWorkspace detail={detail} />
           </div>
         </main>
       </div>

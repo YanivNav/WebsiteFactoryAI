@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { SubmitEvent, useEffect, useState } from "react";
 import { LayoutDashboard, LoaderCircle, Plus, Rocket, X } from "lucide-react";
 import Link from "next/link";
 import { useMutation } from "convex/react";
@@ -64,7 +64,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
 
-  async function submit(event: FormEvent) {
+  async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (!title.trim() || !brief.trim()) return;
     setBusy(true);

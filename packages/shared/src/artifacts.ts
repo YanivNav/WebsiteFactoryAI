@@ -14,17 +14,36 @@ export const ARTIFACT_TYPES = [
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
-export interface Artifact<T extends ArtifactType, V> {
+const artifactTypeMap = {
+  brief: {} as string,
+  questions: {} as Question[],
+  specification: {} as Specification,
+  design: {},
+  manualTasks: {},
+  qaPlan: {},
+  qaResult: {},
+  websiteContent: {}
+} satisfies Record<ArtifactType, unknown>;
+
+type ArtifactTypeMap = typeof artifactTypeMap;
+
+export type ArtifactData<T extends keyof ArtifactTypeMap> = ArtifactTypeMap[T];
+
+export interface Artifact<T extends ArtifactType = any> {
   type: T;
   name: string;
-  data: T;
+  data: ArtifactData<T>;
+  version: number;
+  assets: Asset[];
 }
 
-export type BriefArtifact = Artifact<'brief', string>;
-export type QuestionsArtifact = Artifact<'questions', Question[]>;
-export type SpecificationArtifact = Artifact<'specification', Specification>;
+export interface Asset {
+  id: string;
+  url: string;
+}
 
 export const QuestionSchema = z.object({
+  id: z.number().describe('A one-based question index'),
   category: z.enum([
     'content',
     'workflows',
