@@ -3,6 +3,7 @@ import {ProjectDetail} from "@/data/useProjectDetail";
 import { Stage } from "@factory/shared";
 import {SimpleProgressStage} from "@/components/stages/SimpleProgressStage";
 import {QuestionsStage} from "@/components/stages/QuestionsStage";
+import {SpecificationStage} from "@/components/stages/SpecificationStage";
 
 export interface StageViewProps {
   detail: ProjectDetail;
@@ -10,7 +11,9 @@ export interface StageViewProps {
 
 export const STAGE_VIEWS: Partial<Record<Stage, ComponentType<StageViewProps>>> = {
   GeneratingQuestions: SimpleProgressStage,
-  WaitingForAnswers: QuestionsStage
+  WaitingForAnswers: QuestionsStage,
+  GeneratingSpecification: SimpleProgressStage,
+  WaitingForSpecificationApproval: SpecificationStage
 };
 
 export function EmptyStageView() {
