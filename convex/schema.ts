@@ -17,7 +17,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {STAGES} from "@factory/shared";
-import {ARTIFACT_TYPES} from "../packages/shared/src/artifacts";
+import {ARTIFACT_TYPES} from "@factory/shared";
 
 export const stageValidator = v.union(
   ...STAGES.map(stage => v.literal(stage))
@@ -26,6 +26,12 @@ export const stageValidator = v.union(
 export const artifactTypeValidator = v.union(
   ...ARTIFACT_TYPES.map(t => v.literal(t))
 );
+
+export const assetSchema = v.object({
+  id: v.string(),
+  data: v.any(),
+  storageId: v.id('_storage')
+});
 
 export default defineSchema({
   projects: defineTable({
@@ -63,10 +69,8 @@ export default defineSchema({
     // Old artifacts stay append-only, but planning stages only reuse artifacts from
     // the current cycle.
     planningCycle: v.number(),
-    progress: v.optional(v.object({
-      step: v.number(),
-      total: v.number()
-    }))
+    progress: v.optional(v.number()),
+    lastError: v.optional(v.string())
   })
     .index("by_stage", ["currentStage"])
     .index("by_owner", ["owner"]),
@@ -74,15 +78,10 @@ export default defineSchema({
   artifacts: defineTable({
     projectId: v.id("projects"),
     type: artifactTypeValidator,
-    stage: stageValidator,
-    name: v.string(),
     planningCycle: v.number(),
     version: v.number(),
     data: v.any(),
-    assets: v.array(v.object({
-      id: v.string(),
-      storageId: v.id('_storage')
-    }))
+    assets: v.array(assetSchema)
   }).index("by_project", ["projectId"])
     .index("by_project_and_type", ["projectId", "type"]),
 
@@ -93,6 +92,4 @@ export default defineSchema({
     message: v.string(),
     data: v.optional(v.any()),
   }).index("by_project", ["projectId"]),
-
-
 });

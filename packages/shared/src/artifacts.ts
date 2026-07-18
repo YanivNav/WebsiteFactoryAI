@@ -30,15 +30,17 @@ type ArtifactTypeMap = typeof artifactTypeMap;
 export type ArtifactData<T extends keyof ArtifactTypeMap> = ArtifactTypeMap[T];
 
 export interface Artifact<T extends ArtifactType = any> {
+  id: string;
   type: T;
-  name: string;
   data: ArtifactData<T>;
   version: number;
+  planningCycle: number;
   assets: Asset[];
 }
 
 export interface Asset {
   id: string;
+  data: any;
   url: string;
 }
 

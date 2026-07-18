@@ -1,21 +1,9 @@
-import type { ProjectMode, Stage } from "@factory/shared";
-import type { ProjectId, ProjectStore } from "../store";
+import type {Stage} from "@factory/shared";
+import type {StageContext} from "./context";
 
-/** Inputs and infrastructure available to one isolated stage implementation. */
-export interface StageContext {
-  projectId: ProjectId;
-  projectTitle: string;
-  stage: Stage;
-  brief: string;
-  mode: ProjectMode;
-  settings: { publishTarget: string };
-  attempts: number;
-  store: ProjectStore;
-  log(message: string, data?: Record<string, unknown>): Promise<void>;
-}
 
 export type StageResult =
-  { kind: "advance", target?: Stage | 'next' } | { kind: "failed"; error: string; };
+  { kind: "advance", target?: Stage } | { kind: "failed"; error: string; retryable: boolean };
 
 export interface StageHandler {
   readonly stage: Stage;

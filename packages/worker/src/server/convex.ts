@@ -1,19 +1,24 @@
 /** Convex adapter for the worker's small scheduling-focused persistence port. */
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
-import type { Stage } from "@factory/shared";
-import type { CommittedResult, LeasedProject, ProjectId, ProjectStore } from ".";
+import {ConvexHttpClient} from "convex/browser";
+import {makeFunctionReference} from "convex/server";
+import type {Artifact, ArtifactData, ArtifactType, Stage} from "@factory/shared";
+import type {CommittedResult, LeasedProject, ProjectId, ServerAccess} from ".";
 
 const mutation = (name: string) => makeFunctionReference<"mutation">(name);
+const query = (name: string) => makeFunctionReference<"query">(name);
 
 const functions = {
   leaseNextRunnable: mutation("worker:leaseNextRunnable"),
   renewLease: mutation("worker:renewLease"),
   commitResult: mutation("worker:commitResult"),
   appendLog: mutation("worker:appendLog"),
+  getLatestArtifact: query('worker:getLatestArtifact'),
+  setProgress: mutation('worker:setProgress'),
+  addArtifact: mutation('worker:addArtifact'),
+  updateArtifact: mutation('worker:updateArtifact')
 } as const;
 
-export class ConvexProjectStore implements ProjectStore {
+export class ConvexServer implements ServerAccess {
   private readonly client: ConvexHttpClient;
 
   constructor(
@@ -54,5 +59,34 @@ export class ConvexProjectStore implements ProjectStore {
     data?: Record<string, unknown>;
   }): Promise<void> {
     await this.client.mutation(functions.appendLog, input);
+  }
+
+  async getLatestArtifact<T extends ArtifactType>(projectId: ProjectId, type: T): Promise<Artifact<T>> {
+    return this.client.query(functions.getLatestArtifact, {
+      projectId,
+      type
+    });
+  }
+
+  async setProgress(projectId: ProjectId, percent: number): Promise<void> {
+    await this.client.mutation(functions.setProgress, {
+      projectId,
+      progress: percent
+    });
+  }
+
+  addArtifact<T extends ArtifactType>(projectId: ProjectId, type: T, data: ArtifactData<T>): Promise<Artifact<T>> {
+    return this.client.mutation(functions.addArtifact, {
+      projectId,
+      type,
+      data
+    });
+  }
+
+  updateArtifact<T extends ArtifactType>(artifactId: string, data: ArtifactData<T>): Promise<Artifact<T>> {
+    return this.client.mutation(functions.updateArtifact, {
+      artifactId,
+      data
+    });
   }
 }

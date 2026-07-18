@@ -5,6 +5,7 @@ import { isWaitingStage, STAGE_LABELS } from "@factory/shared";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import {api} from "@convex/_generated/api";
 import {useMutation} from "convex/react";
+import {EmptyStageView, STAGE_VIEWS} from "@/components/stages/StageUI";
 
 export function ProjectWorkspace({
   detail
@@ -16,9 +17,10 @@ export function ProjectWorkspace({
   const { project, stage, statusMessage } = detail;
   const completed = stage === "Completed";
   const waiting = isWaitingStage(stage) && !completed;
+  const StageUI = STAGE_VIEWS[stage] || EmptyStageView;
 
-  return (
-    <section className="border-outline rounded border bg-white p-6">
+  return <div>
+    <section className="border-outline rounded border bg-white p-6 mb-4">
       <div className="flex items-start gap-4">
         <StatusIcon completed={completed} failed={project.status === "failed"} waiting={waiting} />
         <div className="min-w-0 flex-1">
@@ -32,11 +34,14 @@ export function ProjectWorkspace({
                   : "Worker active"}
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{STAGE_LABELS[stage]}</h1>
-          
+          {project.lastError && <div className="mt-3 bg-red-200/30 border border-red-500 p-3 w-full rounded-lg">
+            {project.lastError}
+          </div>}
         </div>
       </div>
     </section>
-  );
+    <StageUI detail={detail} />
+  </div>;
 }
 
 function StatusIcon({

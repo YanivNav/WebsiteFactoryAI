@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
-import { ConvexProjectStore } from "./store/convex.js";
+import { ConvexServer } from "./server/convex.js";
 import { LocalRunner } from "./runner/local.js";
 
 // Load env from the REPO ROOT, not the cwd.
@@ -45,7 +45,7 @@ if (!CONVEX_URL) {
 let running = true;
 
 async function main(): Promise<void> {
-  const store = new ConvexProjectStore(CONVEX_URL!, LEASE_TTL_SECONDS);
+  const store = new ConvexServer(CONVEX_URL!, LEASE_TTL_SECONDS);
   const runner = new LocalRunner(store, WORKER_INSTANCE_ID, LEASE_TTL_SECONDS);
 
   console.error(`[worker ${WORKER_INSTANCE_ID}] started — polling ${CONVEX_URL}`);

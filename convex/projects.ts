@@ -1,8 +1,10 @@
 /** Dashboard-facing project CRUD and minimal waiting-gate controls. */
-import {isRunnableStage, isWaitingStage, nextStage} from "@factory/shared";
+import {Artifact, isRunnableStage, isWaitingStage, nextStage} from "@factory/shared";
 import {v} from "convex/values";
-import {mutation, query} from "./_generated/server";
-import {api} from "./_generated/api";
+import {mutation, MutationCtx, query} from "./_generated/server";
+import {api, internal} from "./_generated/api";
+import {Doc, Id} from "./_generated/dataModel";
+import {resolveArtifact} from "./utils";
 
 const SINGLE_USER = "owner";
 
@@ -21,10 +23,7 @@ export const create = mutation({
     await ctx.runMutation(api.worker.addArtifact, {
       projectId,
       type: 'brief',
-      name: 'Brief',
-      data: brief,
-      planningCycle: 0,
-      stage: 'Draft'
+      data: brief
     });
 
     await ctx.db.insert("logs", {
@@ -57,11 +56,14 @@ export const start = mutation({
  * non-runnable; the user explicitly advances them and the worker picks up the result.
  */
 export const continueFromGate = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.id("projects"), stageData: v.optional(v.any()) },
+  handler: async (ctx, { projectId, stageData }) => {
     const project = await ctx.db.get(projectId);
     if (!project) throw new Error("Project not found");
     if (!isWaitingStage(project.currentStage) || project.currentStage === "Completed") return;
+    if (stageData) {
+      await submitStage(ctx, project, stageData);
+    }
 
     const next = nextStage(project.currentStage);
     await ctx.db.insert("logs", {
@@ -79,6 +81,17 @@ export const continueFromGate = mutation({
   },
 });
 
+async function submitStage(ctx: MutationCtx, project: Doc<'projects'>, data: any): Promise<void> {
+  switch (project.currentStage) {
+    case "WaitingForAnswers":
+      const questions = await ctx.runQuery(api.worker.getLatestArtifact, {projectId: project._id, type: 'questions'});
+      if (!questions) return;
+      await ctx.db.patch('artifacts', questions.id as Id<'artifacts'>, {
+        data
+      });
+  }
+}
+
 export const retryCurrentStage = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, { projectId }) => {
@@ -90,6 +103,7 @@ export const retryCurrentStage = mutation({
       status: "active",
       leaseWorkerId: undefined,
       leaseExpiresAt: undefined,
+      lastError: undefined
     });
   },
 });
@@ -119,26 +133,14 @@ export const detail = query({
       .withIndex('by_project', q => q.eq('projectId', projectId))
       .collect();
 
-    const storageIds = [...new Set(artifacts.flatMap(a => a.assets).map(a => a.storageId))];
-    const assetUrls = Object.fromEntries(
-      await Promise.all(
-        storageIds.map(async (storageId) => [
-          storageId,
-          await ctx.storage.getUrl(storageId)
-        ]),
-      ),
+    const resolvedArtifacts: Artifact[] = await Promise.all(
+      artifacts.map(a => resolveArtifact(ctx, a))
     );
 
     return {
       project,
       logs,
-      artifacts: artifacts.map(artifact => ({
-        ...artifact,
-        assets: artifact.assets.map(asset => ({
-          id: asset.id,
-          url: assetUrls[asset.storageId]
-        }))
-      }))
+      artifacts: resolvedArtifacts
     };
   },
 });

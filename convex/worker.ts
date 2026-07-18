@@ -1,10 +1,9 @@
 /** Atomic queue operations used by the background worker. */
-import { isRunnableStage, STAGES } from "@factory/shared";
-import { v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
-import { mutation } from "./_generated/server";
+import {isRunnableStage, STAGES} from "@factory/shared";
+import {v} from "convex/values";
+import {mutation, query} from "./_generated/server";
 import {artifactTypeValidator, stageValidator} from "./schema";
-import {ARTIFACT_TYPES} from "../packages/shared/src/artifacts";
+import {resolveArtifact} from "./utils";
 
 const RUNNABLE_STAGES = STAGES.filter(isRunnableStage);
 
@@ -68,23 +67,101 @@ export const addArtifact = mutation({
   args: {
     projectId: v.id('projects'),
     type: artifactTypeValidator,
-    stage: stageValidator,
-    name: v.string(),
-    data: v.any(),
-    planningCycle: v.number()
+    data: v.any()
   },
   handler: async (ctx, input) => {
     const existing = await ctx.db.query('artifacts')
       .withIndex('by_project_and_type', q => q.eq('projectId', input.projectId).eq('type', input.type))
       .collect();
+    const project = await ctx.db.get('projects', input.projectId);
+    if (!project) return;
 
     const version = existing.length + 1;
     const artifactId = await ctx.db.insert('artifacts', {
       ...input,
       version,
+      planningCycle: project.planningCycle,
       assets: []
     });
 
     return {artifactId, version};
   }
 });
+
+export const updateArtifact = mutation({
+  args: {
+    artifactId: v.id('artifacts'),
+    data: v.any()
+  },
+  handler: async (ctx, input) => {
+    const existing = await ctx.db.get('artifacts', input.artifactId);
+    if (!existing) return;
+
+    const artifactId = await ctx.db.patch('artifacts', input.artifactId, {
+      data: input.data
+    });
+
+    return {artifactId};
+  }
+});
+
+
+export const setProgress = mutation({
+  args: {projectId: v.id('projects'), progress: v.number()},
+  handler: async (ctx, args) => {
+    await ctx.db.patch('projects', args.projectId, {
+      progress: args.progress
+    });
+  }
+});
+
+export const getLatestArtifact = query({
+  args: {
+    projectId: v.id('projects'),
+    type: artifactTypeValidator
+  },
+  handler: async (ctx, args) => {
+    const artifacts = await ctx.db.query('artifacts')
+      .withIndex('by_project_and_type', q => q.eq('projectId', args.projectId).eq('type', args.type))
+      .collect();
+    const sorted = artifacts
+      .toSorted((a, b) => b.version - a.version);
+    if (!sorted.length) return;
+    return resolveArtifact(ctx, sorted[0]);
+  }
+});
+
+export const commitResult = mutation({
+  args: {
+    projectId: v.id('projects'),
+    workerId: v.string(),
+    result: v.union(
+      v.object({kind: v.literal('advance'), next: stageValidator}),
+      v.object({kind: v.literal('error'), error: v.string()})
+    )
+  },
+  handler: async (ctx, {projectId, workerId, result}) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("Project not found");
+
+    if (project.leaseWorkerId !== workerId) return;
+
+    const releaseLease = { leaseWorkerId: undefined, leaseExpiresAt: undefined };
+
+    if (result.kind === "advance") {
+      await ctx.db.patch(projectId, {
+        ...releaseLease,
+        currentStage: result.next,
+        progress: 0,
+        status: result.next === "Completed" ? "completed" : "active",
+      });
+      return;
+    } else {
+      await ctx.db.patch(projectId, {
+        ...releaseLease,
+        progress: 0,
+        lastError: result.error
+      })
+    }
+  }
+})

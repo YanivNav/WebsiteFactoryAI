@@ -9,12 +9,11 @@ export function SimpleProgressStage({detail}: StageViewProps) {
       <div>
         <h2 className="text-lg font-semibold">{detail.statusMessage}</h2>
       </div>
-      <div>
-        <div className="mt-3 h-1.5 rounded-full bg-[#e1e3e6]">
-          <div className="bg-primary h-full rounded-full transition-[width] duration-500"
-               style={{width: `${Math.round(detail.project.progress?.step ?? 0) / (detail.project.progress?.total ?? 1)}%`}} />
-        </div>
-      </div>
+      <div className="ms-auto text-sm font-semibold">{detail.project.progress ?? 0}%</div>
+    </div>
+    <div className="mt-3 h-1.5 w-full rounded-full bg-[#e1e3e6]">
+      <div className="bg-primary h-full rounded-full transition-[width] duration-500"
+           style={{width: `${detail.project.progress ?? 0}%`}} />
     </div>
   </section>
 }
