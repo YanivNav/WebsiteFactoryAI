@@ -1,5 +1,5 @@
 import type {StageHandler} from "./types";
-import {LLMService} from "../services/llm/llm";
+import {LLMService} from "../services/llm";
 import {loadPrompt} from "../lib/prompts";
 import {z} from "zod";
 import {QuestionSchema} from "@factory/shared";
@@ -10,7 +10,10 @@ export const generateQuestions: StageHandler = {
   stage: 'GeneratingQuestions',
   async run(ctx) {
     ctx.progress(0, 'Reviewing your brief');
-    const latestQuestions = await ctx.getLatestArtifact('questions');
+    const [latestQuestions, brief] = await Promise.all([
+      ctx.getLatestArtifact('questions'),
+      ctx.getLatestArtifact('brief'),
+    ]);
 
     llm ??= new LLMService();
 
@@ -18,7 +21,7 @@ export const generateQuestions: StageHandler = {
 
     const result = await llm.generateObject({
       instructions: loadPrompt('questions'),
-      prompt: `Website Brief:\n${ctx.project.brief}\n
+      prompt: `Website Brief:\n${brief?.data ?? 'No brief provided.'}\n
       Questions already asked and their answers: \n${
         latestQuestions ? latestQuestions.data
           .map(question => `${question.id}. ${question.prompt}: ${question.answer || 'no answer'}`).join('\n')

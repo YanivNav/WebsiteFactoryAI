@@ -1,5 +1,5 @@
 /** Dashboard-facing project CRUD and minimal waiting-gate controls. */
-import {Artifact, isRunnableStage, isWaitingStage, nextStage} from "@factory/shared";
+import {Artifact, isRunnableStage, isWaitingStage, nextStage, previousStage} from "@factory/shared";
 import {v} from "convex/values";
 import {mutation, MutationCtx, query} from "./_generated/server";
 import {api, internal} from "./_generated/api";
@@ -89,6 +89,44 @@ async function submitStage(ctx: MutationCtx, project: Doc<'projects'>, data: any
       await ctx.db.patch('artifacts', questions.id as Id<'artifacts'>, {
         data
       });
+  }
+}
+
+export const regenerateStage = mutation({
+  args: { projectId: v.id("projects"), feedback: v.optional(v.any()) },
+  handler: async (ctx, { projectId, feedback }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("Project not found");
+    if (!isWaitingStage(project.currentStage) || project.currentStage === "Completed") return;
+
+    await prepareRegeneration(ctx, project, feedback);
+
+    const target = previousStage(project.currentStage);
+    await ctx.db.insert("logs", {
+      projectId,
+      stage: project.currentStage,
+      level: "info",
+      message: "User asked to regenerate",
+    });
+    await ctx.db.patch(projectId, {
+      currentStage: target,
+      status: "active",
+      progress: 0,
+      leaseWorkerId: undefined,
+      leaseExpiresAt: undefined,
+      lastError: undefined,
+    });
+  },
+});
+
+async function prepareRegeneration(ctx: MutationCtx, project: Doc<'projects'>, _feedback: any): Promise<void> {
+  switch (project.currentStage) {
+    case "WaitingForAnswers": {
+      // Clear the existing questions so the re-run produces a fresh set instead
+      // of appending follow-ups to the ones the user just rejected.
+      const questions = await ctx.runQuery(api.worker.getLatestArtifact, {projectId: project._id, type: 'questions'});
+      if (questions) await ctx.db.patch('artifacts', questions.id as Id<'artifacts'>, { data: [] });
+    }
   }
 }
 

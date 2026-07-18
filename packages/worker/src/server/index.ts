@@ -7,7 +7,6 @@ export interface LeasedProject {
   id: ProjectId;
   title: string;
   currentStage: Stage;
-  brief: string;
   settings: {
     mode: "simple" | "developer";
     publishTarget: string;

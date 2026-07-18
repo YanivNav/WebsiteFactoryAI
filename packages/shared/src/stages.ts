@@ -108,3 +108,16 @@ export function nextStage(current: Stage): Stage {
 
   return STAGES[index + 1] ?? 'Completed';
 }
+
+/**
+ * The stage immediately before `current`. For a `Waiting*` gate this is the
+ * `Generating*` stage that produced its artifact — i.e. the stage a "regenerate"
+ * action re-runs. Clamps at the first stage.
+ */
+export function previousStage(current: Stage): Stage {
+  const index = STAGES.indexOf(current);
+  if (index === -1) {
+    throw new Error(`Unknown stage: ${current}`);
+  }
+  return STAGES[Math.max(0, index - 1)]!;
+}

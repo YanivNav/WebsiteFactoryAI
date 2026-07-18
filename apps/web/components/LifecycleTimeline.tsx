@@ -29,25 +29,27 @@ export function LifecycleTimeline({ stage }: { stage: Stage }) {
             const active = current >= step.stageIndex && current < nextIndex;
             const complete = current >= nextIndex || stage === "Completed";
             return (
-              <li className="flex items-start gap-3" key={step.label}>
+              <li className={`flex gap-3 ${active || complete ? 'items-start' : 'items-center'}`} key={step.label}>
                 <StepIcon active={active} complete={complete} waiting={isWaitingStage(stage)} />
                 <span>
                   <span
-                    className={`block text-xs font-semibold ${
+                    className={`block text-sm font-semibold ${
                       active ? "text-primary" : complete ? "text-ink" : "text-[#858c98]"
                     }`}
                   >
                     {step.label}
                   </span>
+                  {complete || active ?
                   <span className="mt-0.5 block text-[11px] text-[#737b88]">
                     {complete
-                      ? "Complete"
+                      ? "Completed"
                       : active
                         ? isWaitingStage(stage)
                           ? "Waiting"
                           : "In progress"
-                        : "Queued"}
+                        : ""}
                   </span>
+                    : null}
                 </span>
               </li>
             );

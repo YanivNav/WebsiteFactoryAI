@@ -56,15 +56,19 @@ export const QuestionSchema = z.object({
   prompt: z.string().describe('The question body, in a concise, non-technical phrasing. Using Wix related terms is fine'),
   rationale: z.string().describe('Short explanation to the user of what decision this answer affects'),
   options: z.array(z.string()).min(1).nullable()
-    .describe('A list of options to answer this question. Each answer should be a short user-facing label. For open ended question, leave this array null.'),
-  allowFreeText: z.boolean().describe('Whether a free text answer is allowed. If this is an open ended question, this must be true.'),
-  isList: z.boolean().describe('True if this question is a list, for example a list of fields to have in a form or collection.'),
+    .describe('Answer options as short user-facing labels, grounded in this specific project — never generic examples that do not apply. ' +
+      'If isList is true you MUST provide your best proposed list here (non-empty) for the user to edit. ' +
+      'Leave null only for a pure open-ended question that has no sensible starting options.'),
+  allowFreeText: z.boolean().describe('Whether a free text answer is allowed. Set true whenever your options might not cover the correct answer ' +
+    '(i.e. you are guessing at them), and always for open-ended questions. Only set false when the options are genuinely exhaustive, such as a yes/no or a closed factual choice.'),
+  isList: z.boolean().describe('True if the answer is a list of items, for example a list of pages, form fields, or CMS collections. ' +
+    'When true, options MUST contain your proposed starting list.'),
   answer: z.string().nullable().describe('The answer to the question - Leave this blank! it will be filled by the user')
 });
 
 export type Question = z.infer<typeof QuestionSchema>;
 
-const PageSchema = z.object({
+export const PageSchema = z.object({
   name: z.string().describe('The name of the page'),
   browserTitle: z.string().describe('The title of the web page (or the template in case of a dynamic page)'),
   path: z.string().describe('URL path, lowercase, starting with a /. Home page is just "/".'),
@@ -109,7 +113,9 @@ const PageSchema = z.object({
     editMode: z.boolean().describe('Whether this dynamic page is for editing the current item'),
     urlTemplate: z.string().describe('The template of the page url, in the format /items/{field}, where field is a name of a field from the collection.')
   })
-})
+});
+
+export type SpecPage = z.infer<typeof PageSchema>;
 
 export const SpecificationSchema = z.object({
   summary: z.string().describe('A paragraph explaining the website in general: what is it about, what it provides...'),

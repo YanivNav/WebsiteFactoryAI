@@ -8,8 +8,6 @@ const providers = {
   openai, anthropic, deepseek
 } as const;
 
-type ProviderName = keyof typeof providers;
-
 export interface GenerateObjectRequest<T> {
   model?: LanguageModel;
   instructions: string;
@@ -24,8 +22,7 @@ export class LLMService {
       model: request.model || openai('gpt-5'),
       instructions: request.instructions,
       output: Output.object({schema: z.object({result: request.schema})}),
-      tools: request.tools ?? {},
-
+      tools: request.tools ?? {}
     });
     console.log('Running LLM agent to generate object');
     const result = await agent.generate({prompt: request.prompt});
