@@ -1,4 +1,10 @@
-import type {Artifact, ArtifactData, ArtifactType, Stage} from "@factory/shared";
+import type {
+  Artifact,
+  ArtifactData,
+  ArtifactType,
+  GenerationRequest,
+  Stage,
+} from "@factory/shared";
 
 /** IDs are opaque strings at the worker boundary. */
 export type ProjectId = string;
@@ -12,10 +18,18 @@ export interface LeasedProject {
     publishTarget: string;
   };
   attempts: number;
+  generationRequest?: GenerationRequest;
 }
 
 export type CommittedResult =
-  { kind: "advance"; next: Stage } | { kind: "failed"; error: string };
+  | { kind: "advance"; next: Stage }
+  | {
+      kind: "awaitArtifact";
+      next: Stage;
+      artifactId: string;
+      gateKind: "answers" | "review";
+    }
+  | { kind: "failed"; error: string };
 
 /**
  * The worker's persistence port. Keep it limited to scheduling concerns until a real
@@ -32,8 +46,20 @@ export interface ServerAccess {
     message: string;
     data?: Record<string, unknown>;
   }): Promise<void>;
-  getLatestArtifact<T extends ArtifactType>(projectId: ProjectId, artifactType: T): Promise<Artifact<T> | null>;
+  getCurrentArtifact<T extends ArtifactType>(
+    projectId: ProjectId,
+    artifactType: T,
+  ): Promise<Artifact<T> | null>;
+  getArtifact<T extends ArtifactType>(
+    projectId: ProjectId,
+    artifactId: string,
+  ): Promise<Artifact<T> | null>;
   setProgress(projectId: ProjectId, percent: number): Promise<void>;
-  addArtifact<T extends ArtifactType>(projectId: ProjectId, type: T, data: ArtifactData<T>): Promise<Artifact<T>>;
-  updateArtifact<T extends ArtifactType>(artifactId: string, data: ArtifactData<T>): Promise<Artifact<T>>;
+  addArtifact<T extends ArtifactType>(
+    projectId: ProjectId,
+    type: T,
+    data: ArtifactData<T>,
+    sourceArtifactId?: string,
+    generationRequestId?: string,
+  ): Promise<Artifact<T>>;
 }

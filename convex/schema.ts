@@ -16,21 +16,17 @@
 
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import {STAGES} from "@factory/shared";
-import {ARTIFACT_TYPES} from "@factory/shared";
+import { STAGES } from "@factory/shared";
+import { ARTIFACT_TYPES } from "@factory/shared";
 
-export const stageValidator = v.union(
-  ...STAGES.map(stage => v.literal(stage))
-);
+export const stageValidator = v.union(...STAGES.map((stage) => v.literal(stage)));
 
-export const artifactTypeValidator = v.union(
-  ...ARTIFACT_TYPES.map(t => v.literal(t))
-);
+export const artifactTypeValidator = v.union(...ARTIFACT_TYPES.map((t) => v.literal(t)));
 
 export const assetSchema = v.object({
   id: v.string(),
   data: v.any(),
-  storageId: v.id('_storage')
+  storageId: v.id("_storage"),
 });
 
 export default defineSchema({
@@ -70,7 +66,18 @@ export default defineSchema({
     // the current cycle.
     planningCycle: v.number(),
     progress: v.optional(v.number()),
-    lastError: v.optional(v.string())
+    lastError: v.optional(v.string()),
+    // Optional only while existing development projects are migrated. Every newly
+    // created project initializes this manifest.
+    currentArtifacts: v.optional(v.record(v.string(), v.id("artifacts"))),
+    gate: v.optional(
+      v.object({
+        selectedArtifactId: v.id("artifacts"),
+        kind: v.union(v.literal("answers"), v.literal("review")),
+        resumeGenerationRequestId: v.optional(v.id("generationRequests")),
+      }),
+    ),
+    pendingGenerationRequestId: v.optional(v.id("generationRequests")),
   })
     .index("by_stage", ["currentStage"])
     .index("by_owner", ["owner"]),
@@ -80,10 +87,25 @@ export default defineSchema({
     type: artifactTypeValidator,
     planningCycle: v.number(),
     version: v.number(),
+    sourceArtifactId: v.optional(v.id("artifacts")),
+    generationRequestId: v.optional(v.id("generationRequests")),
     data: v.any(),
-    assets: v.array(assetSchema)
-  }).index("by_project", ["projectId"])
-    .index("by_project_and_type", ["projectId", "type"]),
+    assets: v.array(assetSchema),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_and_type", ["projectId", "type"])
+    .index("by_generation_request_and_type", ["generationRequestId", "type"]),
+
+  generationRequests: defineTable({
+    projectId: v.id("projects"),
+    outputType: artifactTypeValidator,
+    mode: v.union(v.literal("initial"), v.literal("regenerate"), v.literal("revise")),
+    inputs: v.record(v.string(), v.id("artifacts")),
+    baseArtifactId: v.optional(v.id("artifacts")),
+    feedback: v.optional(v.string()),
+    parentRequestId: v.optional(v.id("generationRequests")),
+    planningCycle: v.number(),
+  }).index("by_project", ["projectId"]),
 
   logs: defineTable({
     projectId: v.id("projects"),

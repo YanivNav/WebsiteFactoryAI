@@ -9,9 +9,11 @@ import { isRunnableStage, STAGES, type Stage } from "@factory/shared";
 import { fakeWork } from "./fake";
 import type { StageHandler } from "./types";
 import {generateQuestions} from "./generate-questions";
+import {generateSpecification} from "./generate-specification";
 
 export const HANDLERS: Partial<Record<Stage, StageHandler>> = {
-  'GeneratingQuestions': generateQuestions
+  'GeneratingQuestions': generateQuestions,
+  'GeneratingSpecification': generateSpecification
 }
 
 export type { StageHandler, StageResult } from "./types";

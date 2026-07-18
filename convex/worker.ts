@@ -1,9 +1,9 @@
 /** Atomic queue operations used by the background worker. */
-import {isRunnableStage, STAGES} from "@factory/shared";
-import {v} from "convex/values";
-import {mutation, query} from "./_generated/server";
-import {artifactTypeValidator, stageValidator} from "./schema";
-import {resolveArtifact} from "./utils";
+import { isRunnableStage, STAGES } from "@factory/shared";
+import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
+import { artifactTypeValidator, stageValidator } from "./schema";
+import { resolveArtifact } from "./utils";
 
 const RUNNABLE_STAGES = STAGES.filter(isRunnableStage);
 
@@ -29,11 +29,25 @@ export const leaseNextRunnable = mutation({
         leaseExpiresAt: now + ttlSeconds * 1000,
       });
 
+      const generationRequest = project.pendingGenerationRequestId
+        ? await ctx.db.get(project.pendingGenerationRequestId)
+        : null;
+
       return {
         id: project._id,
         title: project.title,
         currentStage: project.currentStage,
         settings: project.settings,
+        generationRequest: generationRequest
+          ? {
+              id: generationRequest._id,
+              outputType: generationRequest.outputType,
+              mode: generationRequest.mode,
+              inputs: generationRequest.inputs,
+              baseArtifactId: generationRequest.baseArtifactId,
+              feedback: generationRequest.feedback,
+            }
+          : undefined,
       };
     }
 
@@ -65,82 +79,155 @@ export const appendLog = mutation({
 
 export const addArtifact = mutation({
   args: {
-    projectId: v.id('projects'),
+    projectId: v.id("projects"),
     type: artifactTypeValidator,
-    data: v.any()
+    data: v.any(),
+    sourceArtifactId: v.optional(v.id("artifacts")),
+    generationRequestId: v.optional(v.id("generationRequests")),
   },
   handler: async (ctx, input) => {
-    const existing = await ctx.db.query('artifacts')
-      .withIndex('by_project_and_type', q => q.eq('projectId', input.projectId).eq('type', input.type))
+    const existing = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) =>
+        q.eq("projectId", input.projectId).eq("type", input.type),
+      )
       .collect();
-    const project = await ctx.db.get('projects', input.projectId);
+    const project = await ctx.db.get("projects", input.projectId);
     if (!project) return;
 
     const version = existing.length + 1;
-    const artifactId = await ctx.db.insert('artifacts', {
-      ...input,
+    const sourceArtifactId = input.sourceArtifactId;
+    if (sourceArtifactId) {
+      const source = await ctx.db.get(sourceArtifactId);
+      if (
+        !source ||
+        source.projectId !== input.projectId ||
+        source.type !== input.type ||
+        source.planningCycle !== project.planningCycle
+      ) {
+        throw new Error("Artifact source does not match the new version");
+      }
+    }
+    if (input.generationRequestId) {
+      const request = await ctx.db.get(input.generationRequestId);
+      if (
+        !request ||
+        request.projectId !== input.projectId ||
+        project.pendingGenerationRequestId !== request._id
+      ) {
+        throw new Error("Generation request does not belong to this project");
+      }
+
+      const existingOutput = await ctx.db
+        .query("artifacts")
+        .withIndex("by_generation_request_and_type", (q) =>
+          q.eq("generationRequestId", request._id).eq("type", input.type),
+        )
+        .first();
+      if (existingOutput) {
+        return resolveArtifact(ctx, existingOutput);
+      }
+    }
+    const artifactId = await ctx.db.insert("artifacts", {
+      projectId: input.projectId,
+      type: input.type,
+      data: input.data,
+      sourceArtifactId,
+      generationRequestId: input.generationRequestId,
       version,
       planningCycle: project.planningCycle,
-      assets: []
+      assets: [],
     });
 
-    return {artifactId, version};
-  }
-});
-
-export const updateArtifact = mutation({
-  args: {
-    artifactId: v.id('artifacts'),
-    data: v.any()
+    return {
+      id: artifactId,
+      type: input.type,
+      data: input.data,
+      version,
+      planningCycle: project.planningCycle,
+      sourceArtifactId,
+      generationRequestId: input.generationRequestId,
+      assets: [],
+    };
   },
-  handler: async (ctx, input) => {
-    const existing = await ctx.db.get('artifacts', input.artifactId);
-    if (!existing) return;
-
-    const artifactId = await ctx.db.patch('artifacts', input.artifactId, {
-      data: input.data
-    });
-
-    return {artifactId};
-  }
 });
-
 
 export const setProgress = mutation({
-  args: {projectId: v.id('projects'), progress: v.number()},
+  args: { projectId: v.id("projects"), progress: v.number() },
   handler: async (ctx, args) => {
-    await ctx.db.patch('projects', args.projectId, {
-      progress: args.progress
+    await ctx.db.patch("projects", args.projectId, {
+      progress: args.progress,
     });
-  }
+  },
 });
 
-export const getLatestArtifact = query({
+export const getCurrentArtifact = query({
   args: {
-    projectId: v.id('projects'),
-    type: artifactTypeValidator
+    projectId: v.id("projects"),
+    type: artifactTypeValidator,
   },
   handler: async (ctx, args) => {
-    const artifacts = await ctx.db.query('artifacts')
-      .withIndex('by_project_and_type', q => q.eq('projectId', args.projectId).eq('type', args.type))
+    const project = await ctx.db.get(args.projectId);
+    if (!project) return;
+
+    const currentArtifactId = project.currentArtifacts?.[args.type];
+    if (currentArtifactId) {
+      const currentArtifact = await ctx.db.get(currentArtifactId);
+      if (
+        currentArtifact &&
+        currentArtifact.projectId === args.projectId &&
+        currentArtifact.type === args.type
+      ) {
+        return resolveArtifact(ctx, currentArtifact);
+      }
+    }
+
+    // Backward-compatible fallback for projects created before the manifest was
+    // introduced. The next user decision promotes an explicit pointer.
+    const artifacts = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) =>
+        q.eq("projectId", args.projectId).eq("type", args.type),
+      )
       .collect();
-    const sorted = artifacts
-      .toSorted((a, b) => b.version - a.version);
-    if (!sorted.length) return;
-    return resolveArtifact(ctx, sorted[0]);
-  }
+    const currentCycleArtifacts = artifacts.filter(
+      (artifact) => artifact.planningCycle === project.planningCycle,
+    );
+    if (!currentCycleArtifacts.length) return;
+
+    const artifact = currentCycleArtifacts.toSorted((a, b) => b.version - a.version)[0];
+    return artifact ? resolveArtifact(ctx, artifact) : undefined;
+  },
+});
+
+export const getArtifact = query({
+  args: {
+    projectId: v.id("projects"),
+    artifactId: v.id("artifacts"),
+  },
+  handler: async (ctx, { projectId, artifactId }) => {
+    const artifact = await ctx.db.get(artifactId);
+    if (!artifact || artifact.projectId !== projectId) return;
+    return resolveArtifact(ctx, artifact);
+  },
 });
 
 export const commitResult = mutation({
   args: {
-    projectId: v.id('projects'),
+    projectId: v.id("projects"),
     workerId: v.string(),
     result: v.union(
-      v.object({kind: v.literal('advance'), next: stageValidator}),
-      v.object({kind: v.literal('error'), error: v.string()})
-    )
+      v.object({ kind: v.literal("advance"), next: stageValidator }),
+      v.object({
+        kind: v.literal("awaitArtifact"),
+        next: stageValidator,
+        artifactId: v.id("artifacts"),
+        gateKind: v.union(v.literal("answers"), v.literal("review")),
+      }),
+      v.object({ kind: v.literal("failed"), error: v.string() }),
+    ),
   },
-  handler: async (ctx, {projectId, workerId, result}) => {
+  handler: async (ctx, { projectId, workerId, result }) => {
     const project = await ctx.db.get(projectId);
     if (!project) throw new Error("Project not found");
 
@@ -154,14 +241,55 @@ export const commitResult = mutation({
         currentStage: result.next,
         progress: 0,
         status: result.next === "Completed" ? "completed" : "active",
+        lastError: undefined,
+        gate: undefined,
+        pendingGenerationRequestId: undefined,
       });
       return;
-    } else {
+    }
+
+    if (result.kind === "awaitArtifact") {
+      const artifact = await ctx.db.get(result.artifactId);
+      if (!artifact || artifact.projectId !== projectId) {
+        throw new Error("The artifact gate points to an invalid artifact");
+      }
+      const request = project.pendingGenerationRequestId
+        ? await ctx.db.get(project.pendingGenerationRequestId)
+        : null;
+      const requestCompleted =
+        request &&
+        artifact.generationRequestId === request._id &&
+        artifact.type === request.outputType;
+
+      await ctx.db.patch(projectId, {
+        ...releaseLease,
+        currentStage: result.next,
+        progress: 0,
+        status: "active",
+        lastError: undefined,
+        gate: {
+          kind: result.gateKind,
+          selectedArtifactId: artifact._id,
+          ...(requestCompleted && request.parentRequestId
+            ? { resumeGenerationRequestId: request.parentRequestId }
+            : {}),
+        },
+        pendingGenerationRequestId: requestCompleted
+          ? undefined
+          : project.pendingGenerationRequestId,
+      });
+      return;
+    }
+
+    if (result.kind === "failed") {
       await ctx.db.patch(projectId, {
         ...releaseLease,
         progress: 0,
-        lastError: result.error
-      })
+        lastError: result.error,
+        // Failed work is parked. The lease query only selects active projects, so
+        // another attempt can happen only through the explicit Retry action.
+        status: "failed",
+      });
     }
-  }
-})
+  },
+});

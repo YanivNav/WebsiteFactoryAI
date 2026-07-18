@@ -1,8 +1,8 @@
 /** Convex adapter for the worker's small scheduling-focused persistence port. */
-import {ConvexHttpClient} from "convex/browser";
-import {makeFunctionReference} from "convex/server";
-import type {Artifact, ArtifactData, ArtifactType, Stage} from "@factory/shared";
-import type {CommittedResult, LeasedProject, ProjectId, ServerAccess} from ".";
+import { ConvexHttpClient } from "convex/browser";
+import { makeFunctionReference } from "convex/server";
+import type { Artifact, ArtifactData, ArtifactType, Stage } from "@factory/shared";
+import type { CommittedResult, LeasedProject, ProjectId, ServerAccess } from ".";
 
 const mutation = (name: string) => makeFunctionReference<"mutation">(name);
 const query = (name: string) => makeFunctionReference<"query">(name);
@@ -12,10 +12,10 @@ const functions = {
   renewLease: mutation("worker:renewLease"),
   commitResult: mutation("worker:commitResult"),
   appendLog: mutation("worker:appendLog"),
-  getLatestArtifact: query('worker:getLatestArtifact'),
-  setProgress: mutation('worker:setProgress'),
-  addArtifact: mutation('worker:addArtifact'),
-  updateArtifact: mutation('worker:updateArtifact')
+  getCurrentArtifact: query("worker:getCurrentArtifact"),
+  getArtifact: query("worker:getArtifact"),
+  setProgress: mutation("worker:setProgress"),
+  addArtifact: mutation("worker:addArtifact"),
 } as const;
 
 export class ConvexServer implements ServerAccess {
@@ -61,32 +61,46 @@ export class ConvexServer implements ServerAccess {
     await this.client.mutation(functions.appendLog, input);
   }
 
-  async getLatestArtifact<T extends ArtifactType>(projectId: ProjectId, type: T): Promise<Artifact<T>> {
-    return this.client.query(functions.getLatestArtifact, {
+  async getCurrentArtifact<T extends ArtifactType>(
+    projectId: ProjectId,
+    type: T,
+  ): Promise<Artifact<T> | null> {
+    return this.client.query(functions.getCurrentArtifact, {
       projectId,
-      type
+      type,
+    });
+  }
+
+  async getArtifact<T extends ArtifactType>(
+    projectId: ProjectId,
+    artifactId: string,
+  ): Promise<Artifact<T> | null> {
+    return this.client.query(functions.getArtifact, {
+      projectId,
+      artifactId,
     });
   }
 
   async setProgress(projectId: ProjectId, percent: number): Promise<void> {
     await this.client.mutation(functions.setProgress, {
       projectId,
-      progress: percent
+      progress: percent,
     });
   }
 
-  addArtifact<T extends ArtifactType>(projectId: ProjectId, type: T, data: ArtifactData<T>): Promise<Artifact<T>> {
+  addArtifact<T extends ArtifactType>(
+    projectId: ProjectId,
+    type: T,
+    data: ArtifactData<T>,
+    sourceArtifactId?: string,
+    generationRequestId?: string,
+  ): Promise<Artifact<T>> {
     return this.client.mutation(functions.addArtifact, {
       projectId,
       type,
-      data
-    });
-  }
-
-  updateArtifact<T extends ArtifactType>(artifactId: string, data: ArtifactData<T>): Promise<Artifact<T>> {
-    return this.client.mutation(functions.updateArtifact, {
-      artifactId,
-      data
+      data,
+      ...(sourceArtifactId ? { sourceArtifactId } : {}),
+      ...(generationRequestId ? { generationRequestId } : {}),
     });
   }
 }

@@ -5,8 +5,8 @@
 import { nextStage } from "@factory/shared";
 import type { JobRunner } from ".";
 import { HANDLERS } from "../stages";
-import type {ServerAccess} from "../server";
-import {StageContext} from "../stages/context";
+import type { ServerAccess } from "../server";
+import { StageContext } from "../stages/context";
 
 export class LocalRunner implements JobRunner {
   constructor(
@@ -27,7 +27,7 @@ export class LocalRunner implements JobRunner {
       console.error(`${prefix} ${error}`);
       await this.server.commitResult(project.id, this.workerId, {
         kind: "failed",
-        error
+        error,
       });
       return true;
     }
@@ -51,17 +51,25 @@ export class LocalRunner implements JobRunner {
         const next = result.target || nextStage(project.currentStage);
         await this.server.commitResult(project.id, this.workerId, { kind: "advance", next });
         console.error(`${prefix} completed → ${next}`);
+      } else if (result.kind === "awaitArtifact") {
+        await this.server.commitResult(project.id, this.workerId, {
+          kind: "awaitArtifact",
+          next: result.target,
+          artifactId: result.artifactId,
+          gateKind: result.gateKind,
+        });
+        console.error(`${prefix} completed → ${result.target}`);
       } else {
         await this.server.commitResult(project.id, this.workerId, result);
         console.error(`${prefix} failed — ${result.error}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`${prefix} threw — ${message}`);
+      console.error(`${prefix} threw — ${message}`, error);
       try {
         await this.server.commitResult(project.id, this.workerId, {
           kind: "failed",
-          error: message
+          error: message,
         });
       } catch (commitError) {
         console.error(`${prefix} could not record failure; lease must expire`, commitError);
