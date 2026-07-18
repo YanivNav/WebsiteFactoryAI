@@ -193,7 +193,7 @@ Blast radius of a migration, if those hold: implement `ProjectStore` against Pos
 
 - **Publish target:** `settings.publishTarget: 'wix-managed' | 'custom'`, default `wix-managed` (Astro + `wix release`). `custom` is the escape hatch for sites needing custom auth/integrations; deferred to V2, but the `Publisher` interface exists in V1.
 - **Auth:** none in V1. Single hardcoded owner; the `owner` field exists so multi-user is a swap, not a refactor.
-- **Determinism:** every stage resolves inputs explicitly from Convex + workspace, and records `promptHash` + `inputsHash` on each artifact. No hidden conversational context, ever. Rerunning a stage tomorrow with the same inputs behaves the same way.
+- **Explicit inputs:** every generation request captures the artifact IDs the stage consumes. No hidden conversational context.
 - **Services stay isolated** behind `SpecGenerator` / `DesignGenerator` / `CodeGenerator` / `Publisher`. Wix logic never leaks into code-agent logic. Any one can be swapped without touching the stages.
 
 ---
@@ -241,12 +241,8 @@ manual tasks do. No new mechanism, no pause/resume code, no special casing.
 4. **Cap it at ~5, and make every one earn its place.** A twenty-question interrogation is a
    worse experience than a wrong guess we can correct at the review gate.
 
-**Determinism implication — this one is load-bearing.** The answers become a **durable input
-artifact**, and `GeneratingSpecification` must resolve them explicitly, exactly like the brief.
-They are then folded into `inputsHash`. Get this wrong and the answers become hidden
-conversational context, which is precisely the thing the whole architecture forbids: rerun the
-stage tomorrow and it must behave the same, which means the answers have to be _inputs_, not
-memory.
+The answers become a durable artifact, and the specification generation request captures its exact
+artifact ID alongside the brief. They are explicit inputs rather than conversational memory.
 
 **This supersedes part of Phase 2's guided intake wizard.** A static wizard asks every user the
 same questions; this asks questions derived from _their actual brief_, which is strictly better.
@@ -355,16 +351,21 @@ Every stage is resumable. Every stage is independent. Each stage reads project s
 projects        id, title, owner, status, currentStage, brief,
                 settings { mode, publishTarget, businessName, siteTemplate, solutions[] },
                 wix { projectId, siteId, liveUrl, previewUrl },
+                currentArtifacts { artifactType: artifactId },
+                gate { kind, selectedArtifactId }?, pendingGenerationRequestId?,
                 lease { workerId, expiresAt },     // atomic — prevents double-execution
                 attempts, lastError, createdAt, updatedAt
 
-artifacts       projectId, type, version, data, storageId?, promptHash, inputsHash, createdAt
+artifacts       projectId, type, version, sourceArtifactId?, generationRequestId?,
+                data, storageId?, createdAt
                 type: brief | questions | answers | specification | design
                     | implementationPlan | buildReport | preview | releaseReport
                 // append-only, versioned, NEVER overwritten
-                // `answers` is a DURABLE INPUT: GeneratingSpecification resolves it
-                // explicitly and folds it into inputsHash. Answers must never become
-                // hidden conversational context — that would break determinism.
+                // Artifacts are immutable; current project pointers and the active gate choose
+                // which version is used.
+
+generationRequests  projectId, outputType, mode, inputs, baseArtifactId?, feedback?
+                // Captures exact input IDs and revision intent for a worker run.
 
 reviews         projectId, artifactId, artifactType, version,
                 status: waiting | approved | rejected | needs_changes,
@@ -445,6 +446,12 @@ _Partially built during Phase 1: plain-language stage label, activity feed, revi
 
 Still missing: **stage timeline** (you only see the current stage, not where you are in the journey), **version history** browsing (`design v1` vs `v2` is invisible today), **preview embed**, and the **specification rendered as a friendly summary** instead of raw JSON.
 
+Version history is selection-based, not “latest wins.” Every review surface shows version chips,
+renders the selected version, summarizes its semantic changes from the preceding version, and makes
+clear that approval uses the selected version. Regeneration always appends and selects a new version;
+it never overwrites. A requested revision receives the selected prior version plus feedback and must
+preserve unaffected scope. Downstream stages resolve the selected version explicitly.
+
 Intake is **not** a wizard — it stays "name + describe it", because `GeneratingQuestions` (Phase 3) does the real elicitation, and does it better by tailoring the questions to the actual brief.
 
 **Sequencing note:** most of what remains here renders _real artifacts_. Building it against `{"fake": true}` data would mean building the wrong UI and then rebuilding it — so this lands after Phase 3.
@@ -455,7 +462,7 @@ Two stages, one integration. The questions stage is what makes the specification
 
 - **`GeneratingQuestions`** (`QuestionGenerator`): read the brief, emit **only** what cannot be inferred from it — max ~5, multiple-choice by default, phrased in Wix vocabulary (Stores / Bookings / Blog / CRM). **Emitting zero questions is valid and skips the gate entirely**, so a rich brief is never interrupted.
 - **`WaitingForAnswers`**: the user answers with buttons, not essays. Answers are stored as a durable `answers` artifact.
-- **`GeneratingSpecification`** (`OpenAISpecGenerator`): resolves **brief + answers** explicitly, both folded into `inputsHash`. Produces a schema-constrained specification. Rendered as a **friendly summary in Wix vocabulary**, editable via forms → a new versioned artifact per edit.
+- **`GeneratingSpecification`** (`OpenAISpecGenerator`): resolves the exact **brief + answers** artifact IDs captured by its generation request. Produces a schema-constrained specification. Rendered as a **friendly summary in Wix vocabulary**, editable via forms → a new versioned artifact per edit.
 
 Both stages sit behind the `SpecGenerator` / `QuestionGenerator` interfaces, so the model behind them is swappable without touching anything else.
 
@@ -588,7 +595,7 @@ custom quotes, and deliberately simple sites that should not receive unnecessary
 ## Verification
 
 - **Resumability** (Phase 1, then continuously): kill the worker mid-stage → restart → it resumes at the correct stage with no duplicate artifacts. Lease expiry prevents double-execution.
-- **Determinism:** rerun a stage with identical inputs → identical `inputsHash` / `promptHash`. Divergence means hidden state leaked in.
+- **Explicit-input replay:** retries reuse the generation request's captured artifact IDs and feedback.
 - **Self-healing:** deliberately inject a broken component → confirm the code agent repairs it and the user never sees the error.
 - **Non-programmer walkthrough:** run someone Wix-literate but non-technical through the entire flow. If they hit a word they don't understand, that's a bug.
 - **End-to-end:** one real brief ("portfolio site for a ceramics studio") → all stages → **a live Wix URL**. This is the V1 definition of done.

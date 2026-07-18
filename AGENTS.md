@@ -38,11 +38,9 @@ layer alive for that — just don't design for it now.)_
   pause/resume code** — human-in-the-loop already falls out of the data model, and
   adding a second mechanism would break the first.
 
-- **Every stage is deterministic from its inputs.** A stage reads only what it
-  explicitly resolves from Convex and the workspace. No hidden conversational
-  context, no "what the last prompt said". Rerun it tomorrow with the same inputs
-  and it behaves the same. Artifacts record `promptHash` + `inputsHash` so a
-  violation is detectable rather than mysterious.
+- **Every stage reads explicit inputs.** A generation request captures the artifact
+  IDs the stage consumes. No hidden conversational context and no "what the last
+  prompt said."
 
 - **Artifacts are append-only.** Never overwrite. A rejected specification produces
   `v2`; it does not mutate `v1`.
