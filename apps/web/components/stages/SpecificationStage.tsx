@@ -19,6 +19,7 @@ import { useStageGate } from "@/data/useStageGate";
 import { StageActions } from "./StageActions";
 import { ArtifactVersionPicker } from "@/components/ArtifactVersionPicker";
 import { SpecificationVersionChanges } from "./SpecificationVersionChanges";
+import { VisitorWorkflows } from "./VisitorWorkflows";
 import type { Id } from "@convex/_generated/dataModel";
 
 // Known solutions get a friendly label + icon; anything the plan names that isn't
@@ -123,6 +124,8 @@ export function SpecificationStage({ detail }: StageViewProps) {
           <PageCard key={`${page.path}-${i}`} page={page} />
         ))}
       </div>
+
+      <VisitorWorkflows workflows={spec.visitorWorkflows} />
 
       {revising && (
         <section className="border-outline rounded border bg-white p-4">
