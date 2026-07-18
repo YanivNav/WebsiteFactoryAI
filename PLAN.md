@@ -7,6 +7,13 @@
 > the preserved experimental branch and the intended product, not functionality that
 > currently exists on `develop`.
 
+> **Current execution model:** a project points to either queued/running `Work` or an
+> open `UserTask`. Work captures exact artifact inputs and owns its progress, error,
+> lease, and outputs. A user task owns an `onComplete` action whose pending input is
+> filled by the task's result before the next Work is created. Artifacts are immutable,
+> and version browsing is local until Continue updates the project's approved artifacts.
+> There are no generation requests, waiting stages, gates, or planning cycles.
+
 ## Context
 
 Goal: a web application that turns a natural-language brief into a production Wix Headless website, pausing whenever human review or manual intervention is required, then continuing seamlessly after approval.

@@ -5,7 +5,7 @@ import { api } from "@convex/_generated/api";
 import { useMemo, useState } from "react";
 import { Bell, CircleAlert, CircleHelp, LoaderCircle, Search, UserCircle } from "lucide-react";
 import { Doc } from "@convex/_generated/dataModel";
-import { STAGES, STAGE_LABELS, Stage } from "@factory/shared";
+import { PHASES, type Phase } from "@factory/shared";
 import Link from "next/link";
 
 type Filter = "all" | "action" | "in-progress" | "live";
@@ -18,26 +18,23 @@ export default function Home() {
   const actionNeeded = useMemo(
     () =>
       projects?.filter(
-        (project) =>
-          project.currentStage === "Draft" || project.currentStage.startsWith("WaitingFor"),
+        ({ activity }) => activity?.type === "draft" || activity?.type === "userTask",
       ) ?? [],
     [projects],
   );
   const inProgress = useMemo(
     () =>
       projects?.filter(
-        (project) =>
-          project.status === "active" &&
-          project.currentStage !== "Draft" &&
-          !project.currentStage.startsWith("WaitingFor"),
+        ({ activity }) => activity?.type === "work" && activity.status !== "failed",
       ) ?? [],
     [projects],
   );
   const live = useMemo(
-    () => projects?.filter((project) => project.status === "completed") ?? [],
+    () => projects?.filter(({ activity }) => activity?.type === "completed") ?? [],
     [projects],
   );
-  const activeCount = projects?.filter((project) => project.status === "active").length ?? 0;
+  const activeCount =
+    projects?.filter(({ activity }) => activity?.type !== "completed").length ?? 0;
 
   const filteredProjects = useMemo(() => {
     const source =
@@ -49,7 +46,9 @@ export default function Home() {
             ? live
             : (projects ?? []);
     const query = searchQuery.trim().toLowerCase();
-    return query ? source.filter((project) => project.title.toLowerCase().includes(query)) : source;
+    return query
+      ? source.filter(({ project }) => project.title.toLowerCase().includes(query))
+      : source;
   }, [actionNeeded, filter, inProgress, live, projects, searchQuery]);
 
   return (
@@ -157,7 +156,18 @@ function FilterButton({
   );
 }
 
-function ProjectTable({ loading, projects }: { loading: boolean; projects: Doc<"projects">[] }) {
+type ProjectSummary = {
+  project: Doc<"projects">;
+  activity: {
+    type: "draft" | "work" | "userTask" | "completed";
+    label: string;
+    phase: Phase;
+    status: string;
+    createdAt: number;
+  } | null;
+};
+
+function ProjectTable({ loading, projects }: { loading: boolean; projects: ProjectSummary[] }) {
   return (
     <div className="border-outline overflow-x-auto rounded border bg-white">
       <table className="w-full min-w-205 table-fixed border-collapse">
@@ -171,8 +181,8 @@ function ProjectTable({ loading, projects }: { loading: boolean; projects: Doc<"
           </tr>
         </thead>
         <tbody>
-          {projects.map((project) => (
-            <ProjectRow key={project._id} project={project} />
+          {projects.map((summary) => (
+            <ProjectRow key={summary.project._id} summary={summary} />
           ))}
         </tbody>
       </table>
@@ -192,25 +202,13 @@ function ProjectTable({ loading, projects }: { loading: boolean; projects: Doc<"
   );
 }
 
-function ProjectRow({ project }: { project: Doc<"projects"> }) {
-  const stage = project.currentStage as Stage;
-  const waiting = stage === "Draft" || stage.startsWith("WaitingFor");
-  const completed = stage === "Completed";
-  const displayStep = Math.min(Math.max(1, STAGES.indexOf(stage) + 1), 12);
-  const actionLabel =
-    stage === "Draft"
-      ? "Start Project"
-      : stage === "WaitingForDesignApproval"
-        ? "Review Design"
-        : stage === "WaitingForSpecificationApproval"
-          ? "Review Plan"
-          : stage === "WaitingForFinalApproval"
-            ? "Review Site"
-            : stage === "WaitingForManualActions"
-              ? "View Actions"
-              : completed
-                ? "Manage Site"
-                : "View Details";
+function ProjectRow({ summary }: { summary: ProjectSummary }) {
+  const { project, activity } = summary;
+  const waiting = activity?.type === "draft" || activity?.type === "userTask";
+  const completed = activity?.type === "completed";
+  const failed = activity?.status === "failed";
+  const displayStep = Math.max(1, PHASES.indexOf(activity?.phase ?? "sitePlan") + 1);
+  const actionLabel = completed ? "Manage Site" : waiting ? "View Task" : "View Details";
 
   return (
     <tr className="border-outline h-17.5 border-t text-xs transition-colors hover:bg-[#f9fafb]">
@@ -233,10 +231,10 @@ function ProjectRow({ project }: { project: Doc<"projects"> }) {
           >
             {displayStep}
           </span>
-          <span>{STAGE_LABELS[stage]}</span>
+          <span>{activity?.label ?? "Unavailable"}</span>
         </div>
         <div className="mt-1.5 flex w-30 gap-0.5">
-          {Array.from({ length: 12 }, (_, index) => (
+          {Array.from({ length: PHASES.length }, (_, index) => (
             <span
               className={`relative h-1 flex-1 first:rounded-l last:rounded-r ${index < displayStep ? (waiting ? "bg-[#075ec8]" : "bg-[#b8c0d1]") : "bg-[#e4e6e9]"}`}
               key={index}
@@ -249,9 +247,11 @@ function ProjectRow({ project }: { project: Doc<"projects"> }) {
         </div>
       </td>
       <td className="px-4 py-2.5">
-        <Status waiting={waiting} completed={completed} failed={project.status === "failed"} />
+        <Status waiting={waiting} completed={completed} failed={failed} />
       </td>
-      <td className="px-4 py-2.5 text-[#4e5663]">{formatElapsed(project._creationTime)}</td>
+      <td className="px-4 py-2.5 text-[#4e5663]">
+        {formatElapsed(activity?.createdAt ?? project._creationTime)}
+      </td>
       <td className="px-4 py-2.5 text-right">
         <Link
           className={`inline-flex min-h-7.5 items-center justify-center rounded border px-3 font-semibold tracking-[0.035em] shadow-sm transition-colors ${waiting ? "border-[#2f78e8] bg-[#347cec] text-white hover:bg-[#2269d6]" : "border-outline bg-white text-[#181b20] hover:bg-[#f2f3f5]"}`}

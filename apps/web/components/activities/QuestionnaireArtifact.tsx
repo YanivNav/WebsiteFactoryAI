@@ -1,5 +1,4 @@
-import type { StageViewProps } from "./StageUI";
-import { Question } from "@factory/shared";
+import { type Artifact, type QuestionDefinition } from "@factory/shared";
 import { KeyboardEvent, useCallback, useEffect, useState } from "react";
 import {
   Briefcase,
@@ -11,10 +10,7 @@ import {
   RefreshCw,
   Workflow,
 } from "lucide-react";
-import { useStageGate } from "@/data/useStageGate";
-import { StageActions } from "./StageActions";
-import { ArtifactVersionPicker } from "@/components/ArtifactVersionPicker";
-import type { Id } from "@convex/_generated/dataModel";
+import { ActivityActions } from "./ActivityActions";
 
 // Option pills — mirrors the "Quick Questions" design: a light-blue filled,
 // primary-bordered chip when picked; a subtle outlined chip otherwise.
@@ -34,15 +30,24 @@ const CATEGORY_ICON = {
   auth: Lock,
 } as const;
 
-export function QuestionsStage({ detail }: StageViewProps) {
-  const { submit, regenerate, busy } = useStageGate(detail.project._id);
-  const versions = detail.artifacts.questions ?? [];
-  const selectedArtifactId = detail.selectedArtifactIds.questions;
-  const selectedArtifact =
-    versions.find((artifact) => artifact.id === selectedArtifactId) ?? versions[0];
-  const questions = selectedArtifact?.data;
-  const sortedQuestions = [...(questions ?? [])].sort((a, b) => a.id - b.id);
-  const versionKey = selectedArtifact?.id ?? "none";
+export function QuestionnaireEditor({
+  artifact,
+  previousResponse,
+  busy,
+  onSubmit,
+  onRegenerate,
+}: {
+  artifact: Artifact<"questionnaire">;
+  previousResponse?: Artifact<"questionnaireResponse">;
+  busy: string | null;
+  onSubmit: (data: unknown) => void;
+  onRegenerate: () => void;
+}) {
+  const prior = new Map(
+    previousResponse?.data.answers.map((answer) => [answer.questionId, answer.value]),
+  );
+  const sortedQuestions = artifact.data.questions.toSorted((a, b) => a.id - b.id);
+  const versionKey = artifact.id;
   const [answersByVersion, setAnswersByVersion] = useState<Record<string, Record<number, string>>>(
     {},
   );
@@ -56,63 +61,79 @@ export function QuestionsStage({ detail }: StageViewProps) {
     [versionKey],
   );
 
-  const allAnswered = sortedQuestions.every((q) => (answers[q.id] ?? "").trim().length > 0);
+  const allAnswered = sortedQuestions.every(
+    (question) => (answers[question.id] ?? prior.get(question.id) ?? "").trim().length > 0,
+  );
 
   function handleSubmit() {
-    // Fold the collected answers back into the question set and hand the whole
-    // artifact to the gate — that's this stage's "stage data".
-    const answered = sortedQuestions.map((q) => ({
-      ...q,
-      answer: answers[q.id] ?? q.answer ?? null,
-    }));
-    void submit(answered, selectedArtifact?.id as Id<"artifacts"> | undefined);
+    const response = {
+      answers: sortedQuestions.map((question) => ({
+        questionId: question.id,
+        value: answers[question.id] ?? prior.get(question.id) ?? "",
+      })),
+    };
+    onSubmit(response);
   }
 
   return (
-    <div>
-      <section className="border-outline mb-4 rounded border bg-white p-4">
-        <ArtifactVersionPicker
-          label="Question versions"
-          projectId={detail.project._id}
-          selectedArtifactId={selectedArtifact?.id}
-          versions={versions}
-        />
-      </section>
+    <>
       <div className="flex flex-col gap-4">
         {sortedQuestions.map((question) => (
           <QuestionCard
-            key={`${selectedArtifact?.id}-${question.id}`}
+            key={`${artifact.id}-${question.id}`}
+            initialAnswer={prior.get(question.id) ?? ""}
             question={question}
             setAnswer={setAnswer}
           />
         ))}
       </div>
-      <StageActions
+      <ActivityActions
         hint={!allAnswered ? "Answer every question to continue" : undefined}
         primary={{
           label: "Continue",
           onClick: handleSubmit,
-          loading: busy === "submit",
+          loading: busy === "complete",
           disabled: busy !== null || !allAnswered,
         }}
         secondary={{
           label: "Regenerate questions",
-          onClick: () =>
-            void regenerate(undefined, selectedArtifact?.id as Id<"artifacts"> | undefined),
-          loading: busy === "regenerate",
+          onClick: onRegenerate,
+          loading: busy === "revise",
           disabled: busy !== null,
           icon: <RefreshCw size={16} />,
         }}
       />
+    </>
+  );
+}
+
+export function QuestionnaireResponseView({
+  questionnaire,
+  response,
+}: {
+  questionnaire: Artifact<"questionnaire">;
+  response: Artifact<"questionnaireResponse">;
+}) {
+  const answers = new Map(response.data.answers.map((answer) => [answer.questionId, answer.value]));
+  return (
+    <div className="flex flex-col gap-3">
+      {questionnaire.data.questions.map((question) => (
+        <section className="border-outline rounded border bg-white p-4" key={question.id}>
+          <p className="text-ink text-sm font-semibold">{question.prompt}</p>
+          <p className="text-primary mt-2 text-sm">{answers.get(question.id) || "No answer"}</p>
+        </section>
+      ))}
     </div>
   );
 }
 
 function QuestionCard({
   question,
+  initialAnswer,
   setAnswer,
 }: {
-  question: Question;
+  question: QuestionDefinition;
+  initialAnswer: string;
   setAnswer: (id: number, answer: string) => void;
 }) {
   const setThisAnswer = useCallback(
@@ -133,13 +154,13 @@ function QuestionCard({
         question.allowFreeText ? (
           <ChipsSelect
             initial={question.options}
-            initialAnswer={question.answer ?? ""}
+            initialAnswer={initialAnswer}
             setAnswer={setThisAnswer}
           />
         ) : (
           <MultiSelect
             options={question.options ?? []}
-            initialAnswer={question.answer ?? ""}
+            initialAnswer={initialAnswer}
             setAnswer={setThisAnswer}
           />
         )
@@ -147,7 +168,7 @@ function QuestionCard({
         <SingleSelect
           options={question.options}
           allowFreeText={question.allowFreeText}
-          initialAnswer={question.answer ?? ""}
+          initialAnswer={initialAnswer}
           setAnswer={setThisAnswer}
         />
       )}

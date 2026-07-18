@@ -3,15 +3,13 @@
 Architecture baseline for a project-based website factory.
 
 > **Status: architecture shell.** The dashboard, timeline, Convex state, worker polling,
-> atomic leasing, lease renewal, and crash recovery are implemented. Every actual website
-> generation step is intentionally a placeholder.
+> atomic leasing, lease renewal, question generation, and site-plan generation are implemented.
 
 ## The idea
 
-It is not a pipeline. **It is a Project.** A project has a current stage, artifacts,
-logs, and a current stage. A background worker simply advances it. All progress
-lives in Convex, never in memory, so the system survives refreshes, restarts, and
-interruptions.
+It is not a pipeline. **It is a Project.** A project points to current worker-owned
+Work or a human-owned User Task. Both consume and produce immutable, versioned
+artifacts. Progress and errors belong to Work rather than the project itself.
 
 ```
 Draft → Planning your site → [review] → Designing your site → [review]
@@ -20,9 +18,10 @@ Draft → Planning your site → [review] → Designing your site → [review]
       → Publishing → Live ⟲ (ask for changes in plain English)
 ```
 
-The trick that makes human-in-the-loop free: **`Waiting*` stages are not runnable.**
-The worker only leases projects in a _work_ stage. Approving something flips the stage,
-and the worker picks it up on its next tick. There is no pause/resume code anywhere.
+The worker leases only queued Work. A User Task owns its persisted `onComplete` action.
+Completing it supplies the result artifact and atomically performs that action.
+Operation input contracts are declared once in `WORK_DEFINITIONS`; Convex stores and
+validates the generic instruction protocol without knowing individual operations.
 
 ## Architecture
 
@@ -31,7 +30,7 @@ and the worker picks it up on its next tick. There is no pause/resume code anywh
                 │
              Convex        ← the only source of truth (state + work queue)
                 │
-        Background worker  ← polls, leases, advances one stage
+        Background worker  ← polls and leases queued Work
 ```
 
 The worker **pulls** work from Convex, so it needs no inbound address — no webhook, no
@@ -52,11 +51,10 @@ cp .env.example .env.local     # no keys needed to boot
 ```bash
 pnpm convex     # Convex dev server — writes CONVEX_DEPLOYMENT + NEXT_PUBLIC_CONVEX_URL
 pnpm dev        # dashboard → http://localhost:3000
-pnpm worker     # background worker; stages use a short placeholder handler
+pnpm worker     # background worker
 ```
 
-No provider, Wix, GitHub, design, or browser-testing keys are used on this branch.
-Add integrations back one stage at a time behind the worker's stage-handler boundary.
+Add integrations as worker operations behind their service interfaces.
 
 ## Who this is for
 

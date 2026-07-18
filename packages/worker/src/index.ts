@@ -1,8 +1,8 @@
 /**
  * The background build worker.
  *
- * It does exactly one thing: advance projects. Lease a runnable project, execute a
- * single stage, write the result back, release the lease. Nothing else.
+ * It does exactly one thing: lease queued work, execute it, persist its result,
+ * and release the lease.
  *
  * The worker PULLS work from Convex. It needs no inbound network address — no
  * webhook, no tunnel, no open port. That is why the dashboard can live on Vercel

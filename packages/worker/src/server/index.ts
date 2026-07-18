@@ -1,65 +1,152 @@
-import type {
-  Artifact,
-  ArtifactData,
-  ArtifactType,
-  GenerationRequest,
-  Stage,
+import {
+  WORK_DEFINITIONS,
+  type Artifact,
+  type ArtifactData,
+  type ArtifactType,
+  type Phase,
+  type WorkOperation,
 } from "@factory/shared";
 
-/** IDs are opaque strings at the worker boundary. */
 export type ProjectId = string;
+export type WorkId = string;
 
-export interface LeasedProject {
-  id: ProjectId;
-  title: string;
-  currentStage: Stage;
+export type WorkRevision = {
+  mode: "initial" | "regenerate" | "revise";
+  baseArtifactId?: string;
+  feedback?: string;
+};
+
+export type ArtifactInput<T extends ArtifactType> = {
+  source: "artifact";
+  artifactType: T;
+  artifactId: string;
+};
+
+export type UserTaskResultInput<T extends ArtifactType> = {
+  source: "userTaskResult";
+  artifactType: T;
+};
+
+type InputArtifactType<
+  K extends WorkOperation,
+  N extends keyof (typeof WORK_DEFINITIONS)[K]["inputs"],
+> = (typeof WORK_DEFINITIONS)[K]["inputs"][N] & ArtifactType;
+
+type InputName<K extends WorkOperation> = keyof (typeof WORK_DEFINITIONS)[K]["inputs"];
+
+type ReadyWorkInputs<K extends WorkOperation> = {
+  [Name in InputName<K>]: ArtifactInput<InputArtifactType<K, Name>>;
+};
+
+type ContinuationWorkInputs<K extends WorkOperation> = {
+  [PendingName in InputName<K>]: {
+    [Name in InputName<K>]: Name extends PendingName
+      ? UserTaskResultInput<InputArtifactType<K, Name>>
+      : ArtifactInput<InputArtifactType<K, Name>>;
+  };
+}[InputName<K>];
+
+type WorkInputs<
+  K extends WorkOperation,
+  State extends "ready" | "pending",
+> = State extends "pending" ? ContinuationWorkInputs<K> : ReadyWorkInputs<K>;
+
+export type WorkInstruction<
+  K extends WorkOperation = WorkOperation,
+  State extends "ready" | "pending" = "ready",
+> = {
+  [Operation in K]: {
+    type: Operation;
+    inputs: WorkInputs<Operation, State>;
+    revision?: WorkRevision;
+  };
+}[K];
+
+export type WorkDraft<
+  K extends WorkOperation = WorkOperation,
+  State extends "ready" | "pending" = "ready",
+> = {
+  phase: Phase;
+  label: string;
+  instruction: WorkInstruction<K, State>;
+};
+
+export type UserTaskResult =
+  { type: "selectVersion" } | { type: "submitArtifact"; artifactType: ArtifactType };
+
+export type WorkContinuationDraft = WorkDraft<WorkOperation, "pending">;
+
+export type UserTaskOnComplete =
+  { type: "completeProject" } | { type: "startWork"; work: WorkContinuationDraft };
+
+export type UserTaskDraft = {
+  phase: Phase;
+  label: string;
+  subjectArtifactId: string;
+  previousResultArtifactId?: string;
+  result: UserTaskResult;
+  onComplete: UserTaskOnComplete;
+};
+
+export type WorkCompletion =
+  | { type: "completeProject" }
+  | { type: "startWork"; work: WorkDraft }
+  | { type: "createUserTask"; task: UserTaskDraft };
+
+type LeasedWorkCommon = {
+  id: WorkId;
+  projectId: ProjectId;
+  projectTitle: string;
+  phase: Phase;
+  label: string;
+  attempt: number;
   settings: {
     mode: "simple" | "developer";
     publishTarget: string;
   };
-  attempts: number;
-  generationRequest?: GenerationRequest;
-}
+};
 
-export type CommittedResult =
-  | { kind: "advance"; next: Stage }
-  | {
-      kind: "awaitArtifact";
-      next: Stage;
-      artifactId: string;
-      gateKind: "answers" | "review";
-    }
-  | { kind: "failed"; error: string };
+export type LeasedWork<K extends WorkOperation = WorkOperation> = LeasedWorkCommon & {
+  instruction: WorkInstruction<K>;
+};
 
-/**
- * The worker's persistence port. Keep it limited to scheduling concerns until a real
- * stage needs another capability.
- */
 export interface ServerAccess {
-  leaseNextRunnable(workerId: string, ttlSeconds: number): Promise<LeasedProject | null>;
-  renewLease(projectId: ProjectId, workerId: string): Promise<void>;
-  commitResult(projectId: ProjectId, workerId: string, result: CommittedResult): Promise<void>;
+  leaseNextWork(workerId: string, ttlSeconds: number): Promise<LeasedWork | null>;
+  renewLease(workId: WorkId, workerId: string): Promise<void>;
+  completeWork(workId: WorkId, workerId: string, completion: WorkCompletion): Promise<void>;
+  failWork(
+    workId: WorkId,
+    workerId: string,
+    error: string,
+    technicalDetails?: string,
+  ): Promise<void>;
   appendLog(input: {
     projectId: ProjectId;
-    stage: Stage;
+    workId: WorkId;
+    attempt: number;
     level: "info" | "warn" | "error";
     message: string;
     data?: Record<string, unknown>;
   }): Promise<void>;
-  getCurrentArtifact<T extends ArtifactType>(
-    projectId: ProjectId,
-    artifactType: T,
-  ): Promise<Artifact<T> | null>;
+  appendProgress(input: {
+    projectId: ProjectId;
+    workId: WorkId;
+    workerId: string;
+    attempt: number;
+    percent: number;
+    message: string;
+  }): Promise<void>;
   getArtifact<T extends ArtifactType>(
     projectId: ProjectId,
     artifactId: string,
   ): Promise<Artifact<T> | null>;
-  setProgress(projectId: ProjectId, percent: number): Promise<void>;
-  addArtifact<T extends ArtifactType>(
-    projectId: ProjectId,
-    type: T,
-    data: ArtifactData<T>,
-    sourceArtifactId?: string,
-    generationRequestId?: string,
-  ): Promise<Artifact<T>>;
+  addArtifact<T extends ArtifactType>(input: {
+    projectId: ProjectId;
+    workId: WorkId;
+    workerId: string;
+    outputKey: string;
+    type: T;
+    data: ArtifactData<T>;
+    basedOnArtifactId?: string;
+  }): Promise<Artifact<T>>;
 }

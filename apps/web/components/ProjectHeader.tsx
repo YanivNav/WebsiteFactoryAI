@@ -2,10 +2,14 @@
 
 import Link from "next/link";
 import { ChevronRight, CircleHelp, Search, UserCircle } from "lucide-react";
-import { STAGE_LABELS, type Stage } from "@factory/shared";
 
-/** Sticky top bar: breadcrumb back to the dashboard, project title, current stage. */
-export function ProjectHeader({ projectTitle, stage }: { projectTitle: string; stage: Stage }) {
+export function ProjectHeader({
+  projectTitle,
+  activityLabel,
+}: {
+  projectTitle: string;
+  activityLabel: string;
+}) {
   return (
     <header className="border-outline sticky top-0 z-40 flex h-14 items-center justify-between border-b bg-white px-4 backdrop-blur md:px-6">
       <div className="flex min-w-0 items-center gap-2 text-xs">
@@ -15,7 +19,7 @@ export function ProjectHeader({ projectTitle, stage }: { projectTitle: string; s
         <ChevronRight size={14} className="text-[#8a919d]" />
         <strong className="text-ink truncate">{projectTitle}</strong>
         <span className="text-primary ml-3 hidden rounded border border-[#b9d5fb] bg-[#edf5ff] px-2 py-1 text-[10px] font-bold tracking-[0.08em] uppercase sm:inline">
-          {STAGE_LABELS[stage]}
+          {activityLabel}
         </span>
       </div>
       <div className="flex items-center gap-1 text-[#283140]">

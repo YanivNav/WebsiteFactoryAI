@@ -1,29 +1,63 @@
-/**
- * Convex is the state store, and the ONLY source of truth.
- *
- * What lives here is *durable input* — brief, specification, design, approvals,
- * stage. The generated website repository is *derived state*: a function of
- * (specification + design + config), reconstructible at any time. Losing a workspace
- * loses a cache, not a project.
- *
- * The application must survive refreshes, restarts, and interruptions, because all
- * progress lives here and never in memory.
- *
- * NOTE THE SHAPE — it encodes the OCC guardrail from CLAUDE.md:
- * `logs` is a separate append-only table precisely so the worker never has to
- * hot-write the `projects` document while the dashboard is reading it.
- */
-
+import { ARTIFACT_TYPES, PHASES } from "@factory/shared";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { STAGES } from "@factory/shared";
-import { ARTIFACT_TYPES } from "@factory/shared";
 
-export const stageValidator = v.union(...STAGES.map((stage) => v.literal(stage)));
+export const artifactTypeValidator = v.union(...ARTIFACT_TYPES.map((type) => v.literal(type)));
 
-export const artifactTypeValidator = v.union(...ARTIFACT_TYPES.map((t) => v.literal(t)));
+export const phaseValidator = v.union(...PHASES.map((phase) => v.literal(phase)));
 
-export const assetSchema = v.object({
+export const revisionValidator = v.object({
+  mode: v.union(v.literal("initial"), v.literal("regenerate"), v.literal("revise")),
+  baseArtifactId: v.optional(v.id("artifacts")),
+  feedback: v.optional(v.string()),
+});
+
+export const userTaskResultValidator = v.union(
+  v.object({ type: v.literal("selectVersion") }),
+  v.object({
+    type: v.literal("submitArtifact"),
+    artifactType: artifactTypeValidator,
+  }),
+);
+
+export const artifactInputValidator = v.object({
+  source: v.literal("artifact"),
+  artifactType: artifactTypeValidator,
+  artifactId: v.id("artifacts"),
+});
+
+export const userTaskResultInputValidator = v.object({
+  source: v.literal("userTaskResult"),
+  artifactType: artifactTypeValidator,
+});
+
+export const workInstructionValidator = v.object({
+  type: v.string(),
+  inputs: v.record(v.string(), artifactInputValidator),
+  revision: v.optional(revisionValidator),
+});
+
+export const continuationInstructionValidator = v.object({
+  type: v.string(),
+  inputs: v.record(v.string(), v.union(artifactInputValidator, userTaskResultInputValidator)),
+  revision: v.optional(revisionValidator),
+});
+
+export const pendingWorkValidator = v.object({
+  phase: phaseValidator,
+  label: v.string(),
+  instruction: continuationInstructionValidator,
+});
+
+export const userTaskOnCompleteValidator = v.union(
+  v.object({ type: v.literal("completeProject") }),
+  v.object({
+    type: v.literal("startWork"),
+    work: pendingWorkValidator,
+  }),
+);
+
+const assetSchema = v.object({
   id: v.string(),
   data: v.any(),
   storageId: v.id("_storage"),
@@ -33,8 +67,13 @@ export default defineSchema({
   projects: defineTable({
     title: v.string(),
     owner: v.string(),
-    status: v.union(v.literal("active"), v.literal("failed"), v.literal("completed")),
-    currentStage: stageValidator,
+    currentActivity: v.union(
+      v.object({ type: v.literal("draft") }),
+      v.object({ type: v.literal("work"), workId: v.id("works") }),
+      v.object({ type: v.literal("userTask"), userTaskId: v.id("userTasks") }),
+      v.object({ type: v.literal("completed") }),
+    ),
+    approvedArtifacts: v.record(v.string(), v.id("artifacts")),
     settings: v.object({
       mode: v.union(v.literal("simple"), v.literal("developer")),
       publishTarget: v.union(v.literal("wix-managed"), v.literal("custom")),
@@ -56,60 +95,87 @@ export default defineSchema({
         defaultBranch: v.string(),
       }),
     ),
-    // The atomic lease. This is what prevents two workers from executing the same
-    // stage — and the same serialization is what makes the change-request queue
-    // conflict-free, because there is only ever one writer per project.
+  }).index("by_owner", ["owner"]),
+
+  works: defineTable({
+    projectId: v.id("projects"),
+    phase: phaseValidator,
+    label: v.string(),
+    instruction: workInstructionValidator,
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("failed"),
+      v.literal("completed"),
+      v.literal("cancelled"),
+    ),
+    attempt: v.number(),
     leaseWorkerId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
-    // Incremented when the user deliberately starts planning again from the brief.
-    // Old artifacts stay append-only, but planning stages only reuse artifacts from
-    // the current cycle.
-    planningCycle: v.number(),
-    progress: v.optional(v.number()),
-    lastError: v.optional(v.string()),
-    // Optional only while existing development projects are migrated. Every newly
-    // created project initializes this manifest.
-    currentArtifacts: v.optional(v.record(v.string(), v.id("artifacts"))),
-    gate: v.optional(
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    outputArtifactIds: v.array(v.id("artifacts")),
+    error: v.optional(
       v.object({
-        selectedArtifactId: v.id("artifacts"),
-        kind: v.union(v.literal("answers"), v.literal("review")),
-        resumeGenerationRequestId: v.optional(v.id("generationRequests")),
+        message: v.string(),
+        technicalDetails: v.optional(v.string()),
+        code: v.optional(v.string()),
+        retryable: v.boolean(),
+        occurredAt: v.number(),
       }),
     ),
-    pendingGenerationRequestId: v.optional(v.id("generationRequests")),
   })
-    .index("by_stage", ["currentStage"])
-    .index("by_owner", ["owner"]),
+    .index("by_status", ["status"])
+    .index("by_project", ["projectId"]),
+
+  userTasks: defineTable({
+    projectId: v.id("projects"),
+    phase: phaseValidator,
+    label: v.string(),
+    subjectArtifactId: v.id("artifacts"),
+    previousResultArtifactId: v.optional(v.id("artifacts")),
+    result: userTaskResultValidator,
+    onComplete: userTaskOnCompleteValidator,
+    status: v.union(v.literal("open"), v.literal("completed"), v.literal("cancelled")),
+    chosenSubjectArtifactId: v.optional(v.id("artifacts")),
+    resultArtifactId: v.optional(v.id("artifacts")),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_status", ["status"]),
 
   artifacts: defineTable({
     projectId: v.id("projects"),
     type: artifactTypeValidator,
-    planningCycle: v.number(),
     version: v.number(),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    generationRequestId: v.optional(v.id("generationRequests")),
     data: v.any(),
     assets: v.array(assetSchema),
+    basedOnArtifactId: v.optional(v.id("artifacts")),
+    createdByWorkId: v.optional(v.id("works")),
+    createdByUserTaskId: v.optional(v.id("userTasks")),
+    outputKey: v.optional(v.string()),
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_type", ["projectId", "type"])
-    .index("by_generation_request_and_type", ["generationRequestId", "type"]),
+    .index("by_work", ["createdByWorkId"])
+    .index("by_work_and_output", ["createdByWorkId", "outputKey"]),
 
-  generationRequests: defineTable({
+  workProgress: defineTable({
     projectId: v.id("projects"),
-    outputType: artifactTypeValidator,
-    mode: v.union(v.literal("initial"), v.literal("regenerate"), v.literal("revise")),
-    inputs: v.record(v.string(), v.id("artifacts")),
-    baseArtifactId: v.optional(v.id("artifacts")),
-    feedback: v.optional(v.string()),
-    parentRequestId: v.optional(v.id("generationRequests")),
-    planningCycle: v.number(),
-  }).index("by_project", ["projectId"]),
+    workId: v.id("works"),
+    attempt: v.number(),
+    percent: v.number(),
+    message: v.string(),
+    data: v.optional(v.any()),
+  })
+    .index("by_work", ["workId"])
+    .index("by_work_and_attempt", ["workId", "attempt"]),
 
   logs: defineTable({
     projectId: v.id("projects"),
-    stage: stageValidator,
+    workId: v.optional(v.id("works")),
+    userTaskId: v.optional(v.id("userTasks")),
+    attempt: v.optional(v.number()),
     level: v.union(v.literal("info"), v.literal("warn"), v.literal("error")),
     message: v.string(),
     data: v.optional(v.any()),

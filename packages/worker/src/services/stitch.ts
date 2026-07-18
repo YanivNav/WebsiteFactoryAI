@@ -1,5 +1,5 @@
-import type {Specification, SpecPage} from "@factory/shared";
-import type {StageContext} from "../stages/context";
+import type { Specification, SpecPage } from "@factory/shared";
+import type { WorkContext } from "../operations/context";
 
 export interface GeneratedScreen {
   name: string;
@@ -8,8 +8,13 @@ export interface GeneratedScreen {
 }
 
 export class StitchService {
-  generateScreen(ctx: StageContext, brief: string, specification: Specification, page: SpecPage): GeneratedScreen {
-    ctx.progress(0, 'Designing screen: ' + page.name);
-    return {name: '', html: '', image: ''}
+  generateScreen(
+    ctx: WorkContext,
+    brief: string,
+    specification: Specification,
+    page: SpecPage,
+  ): GeneratedScreen {
+    void ctx.progress(0, `Designing screen: ${page.name}`);
+    return { name: "", html: "", image: "" };
   }
 }

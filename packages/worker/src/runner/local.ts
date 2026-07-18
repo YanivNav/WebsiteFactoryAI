@@ -1,12 +1,7 @@
-/**
- * Local execution loop: lease one project, renew its lease while working, run one
- * handler, and atomically commit the outcome with lease release.
- */
-import { nextStage } from "@factory/shared";
 import type { JobRunner } from ".";
-import { HANDLERS } from "../stages";
 import type { ServerAccess } from "../server";
-import { StageContext } from "../stages/context";
+import { WorkContext } from "../operations/context";
+import { getHandler } from "../operations";
 
 export class LocalRunner implements JobRunner {
   constructor(
@@ -16,61 +11,39 @@ export class LocalRunner implements JobRunner {
   ) {}
 
   async tick(): Promise<boolean> {
-    const project = await this.server.leaseNextRunnable(this.workerId, this.leaseTtlSeconds);
-    if (!project) return false;
+    const work = await this.server.leaseNextWork(this.workerId, this.leaseTtlSeconds);
+    if (!work) return false;
 
-    const prefix = `[${project.title}] [${project.currentStage}]`;
-    const handler = HANDLERS[project.currentStage];
-
+    const operation = work.instruction.type;
+    const prefix = `[${work.projectTitle}] [${operation}]`;
+    const handler = getHandler(operation);
     if (!handler) {
-      const error = `No handler registered for ${project.currentStage}`;
+      const error = `No handler registered for ${operation}`;
       console.error(`${prefix} ${error}`);
-      await this.server.commitResult(project.id, this.workerId, {
-        kind: "failed",
-        error,
-      });
+      await this.server.failWork(work.id, this.workerId, error);
       return true;
     }
 
-    console.error(`${prefix} leased`);
+    console.error(`${prefix} leased — attempt ${work.attempt}`);
     const renew = setInterval(
       () => {
         void this.server
-          .renewLease(project.id, this.workerId)
-          .then(() => console.error(`${prefix} lease renewed`))
+          .renewLease(work.id, this.workerId)
           .catch((error) => console.error(`${prefix} lease renewal failed`, error));
       },
       (this.leaseTtlSeconds * 1000) / 3,
     );
 
     try {
-      const context = new StageContext(project, this.server, project.currentStage);
-
-      const result = await handler.run(context);
-      if (result.kind === "advance") {
-        const next = result.target || nextStage(project.currentStage);
-        await this.server.commitResult(project.id, this.workerId, { kind: "advance", next });
-        console.error(`${prefix} completed → ${next}`);
-      } else if (result.kind === "awaitArtifact") {
-        await this.server.commitResult(project.id, this.workerId, {
-          kind: "awaitArtifact",
-          next: result.target,
-          artifactId: result.artifactId,
-          gateKind: result.gateKind,
-        });
-        console.error(`${prefix} completed → ${result.target}`);
-      } else {
-        await this.server.commitResult(project.id, this.workerId, result);
-        console.error(`${prefix} failed — ${result.error}`);
-      }
+      const completion = await handler.run(new WorkContext(work, this.workerId, this.server));
+      await this.server.completeWork(work.id, this.workerId, completion);
+      console.error(`${prefix} completed`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const details = error instanceof Error ? error.stack : undefined;
       console.error(`${prefix} threw — ${message}`, error);
       try {
-        await this.server.commitResult(project.id, this.workerId, {
-          kind: "failed",
-          error: message,
-        });
+        await this.server.failWork(work.id, this.workerId, message, details);
       } catch (commitError) {
         console.error(`${prefix} could not record failure; lease must expire`, commitError);
       }

@@ -1,2 +1,2 @@
-export * from "./stages";
+export * from "./workflow";
 export * from "./artifacts";

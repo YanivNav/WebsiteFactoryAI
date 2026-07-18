@@ -1,20 +1,19 @@
-/** Convex adapter for the worker's small scheduling-focused persistence port. */
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import type { Artifact, ArtifactData, ArtifactType, Stage } from "@factory/shared";
-import type { CommittedResult, LeasedProject, ProjectId, ServerAccess } from ".";
+import type { Artifact, ArtifactType } from "@factory/shared";
+import type { LeasedWork, ServerAccess, WorkCompletion, WorkId } from ".";
 
 const mutation = (name: string) => makeFunctionReference<"mutation">(name);
 const query = (name: string) => makeFunctionReference<"query">(name);
 
 const functions = {
-  leaseNextRunnable: mutation("worker:leaseNextRunnable"),
+  leaseNextWork: mutation("worker:leaseNextWork"),
   renewLease: mutation("worker:renewLease"),
-  commitResult: mutation("worker:commitResult"),
+  completeWork: mutation("worker:completeWork"),
+  failWork: mutation("worker:failWork"),
   appendLog: mutation("worker:appendLog"),
-  getCurrentArtifact: query("worker:getCurrentArtifact"),
+  appendProgress: mutation("worker:appendProgress"),
   getArtifact: query("worker:getArtifact"),
-  setProgress: mutation("worker:setProgress"),
   addArtifact: mutation("worker:addArtifact"),
 } as const;
 
@@ -28,79 +27,57 @@ export class ConvexServer implements ServerAccess {
     this.client = new ConvexHttpClient(url);
   }
 
-  async leaseNextRunnable(workerId: string, ttlSeconds: number): Promise<LeasedProject | null> {
-    return (await this.client.mutation(functions.leaseNextRunnable, {
+  async leaseNextWork(workerId: string, ttlSeconds: number): Promise<LeasedWork | null> {
+    return (await this.client.mutation(functions.leaseNextWork, {
       workerId,
       ttlSeconds,
-    })) as LeasedProject | null;
+    })) as LeasedWork | null;
   }
 
-  async renewLease(projectId: ProjectId, workerId: string): Promise<void> {
+  async renewLease(workId: WorkId, workerId: string): Promise<void> {
     await this.client.mutation(functions.renewLease, {
-      projectId,
+      workId,
       workerId,
       ttlSeconds: this.leaseTtlSeconds,
     });
   }
 
-  async commitResult(
-    projectId: ProjectId,
-    workerId: string,
-    result: CommittedResult,
-  ): Promise<void> {
-    await this.client.mutation(functions.commitResult, { projectId, workerId, result });
+  async completeWork(workId: WorkId, workerId: string, completion: WorkCompletion): Promise<void> {
+    await this.client.mutation(functions.completeWork, { workId, workerId, completion });
   }
 
-  async appendLog(input: {
-    projectId: ProjectId;
-    stage: Stage;
-    level: "info" | "warn" | "error";
-    message: string;
-    data?: Record<string, unknown>;
-  }): Promise<void> {
+  async failWork(
+    workId: WorkId,
+    workerId: string,
+    error: string,
+    technicalDetails?: string,
+  ): Promise<void> {
+    await this.client.mutation(functions.failWork, {
+      workId,
+      workerId,
+      error,
+      technicalDetails,
+    });
+  }
+
+  async appendLog(input: Parameters<ServerAccess["appendLog"]>[0]): Promise<void> {
     await this.client.mutation(functions.appendLog, input);
   }
 
-  async getCurrentArtifact<T extends ArtifactType>(
-    projectId: ProjectId,
-    type: T,
-  ): Promise<Artifact<T> | null> {
-    return this.client.query(functions.getCurrentArtifact, {
-      projectId,
-      type,
-    });
+  async appendProgress(input: Parameters<ServerAccess["appendProgress"]>[0]): Promise<void> {
+    await this.client.mutation(functions.appendProgress, input);
   }
 
   async getArtifact<T extends ArtifactType>(
-    projectId: ProjectId,
+    projectId: string,
     artifactId: string,
   ): Promise<Artifact<T> | null> {
-    return this.client.query(functions.getArtifact, {
-      projectId,
-      artifactId,
-    });
+    return this.client.query(functions.getArtifact, { projectId, artifactId });
   }
 
-  async setProgress(projectId: ProjectId, percent: number): Promise<void> {
-    await this.client.mutation(functions.setProgress, {
-      projectId,
-      progress: percent,
-    });
-  }
-
-  addArtifact<T extends ArtifactType>(
-    projectId: ProjectId,
-    type: T,
-    data: ArtifactData<T>,
-    sourceArtifactId?: string,
-    generationRequestId?: string,
+  async addArtifact<T extends ArtifactType>(
+    input: Parameters<ServerAccess["addArtifact"]>[0],
   ): Promise<Artifact<T>> {
-    return this.client.mutation(functions.addArtifact, {
-      projectId,
-      type,
-      data,
-      ...(sourceArtifactId ? { sourceArtifactId } : {}),
-      ...(generationRequestId ? { generationRequestId } : {}),
-    });
+    return this.client.mutation(functions.addArtifact, input) as Promise<Artifact<T>>;
   }
 }

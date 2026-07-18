@@ -2,20 +2,26 @@
 
 import { useMemo } from "react";
 import { useQuery } from "convex/react";
-import { Artifact, ArtifactType, type Stage, STAGE_LABELS } from "@factory/shared";
+import { ARTIFACT_TYPES, type Artifact, type ArtifactType, type Phase } from "@factory/shared";
 import { api } from "@convex/_generated/api";
 import type { Doc, Id } from "@convex/_generated/dataModel";
 
-export type ArtifactsMap = {
-  [T in ArtifactType]: Artifact<T>[];
-};
+export type ArtifactsMap = { [T in ArtifactType]: Artifact<T>[] };
+export type ActivityStatus = "draft" | "working" | "waiting" | "failed" | "completed";
 
 export interface ProjectDetail {
   project: Doc<"projects">;
-  stage: Stage;
-  statusMessage: string;
+  phase: Phase;
+  activityLabel: string;
+  activityStatus: ActivityStatus;
+  currentWork?: Doc<"works">;
+  currentUserTask?: Doc<"userTasks">;
+  works: Doc<"works">[];
+  userTasks: Doc<"userTasks">[];
+  progress?: Doc<"workProgress">;
+  logs: Doc<"logs">[];
   artifacts: ArtifactsMap;
-  selectedArtifactIds: Partial<Record<ArtifactType, string>>;
+  approvedArtifactIds: Partial<Record<ArtifactType, string>>;
 }
 
 export type ProjectDetailResult =
@@ -26,45 +32,56 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
 
   const detail = useMemo<ProjectDetail | null>(() => {
     if (!data) return null;
-    const stage = data.project.currentStage as Stage;
-    const currentArtifacts = data.artifacts.filter(
-      (artifact) => artifact.planningCycle === data.project.planningCycle,
-    );
-    const artifactsByType: Partial<Record<ArtifactType, Artifact[]>> = Object.groupBy(
-      currentArtifacts,
-      (artifact) => artifact.type,
-    );
-    const sortedArtifacts = Object.fromEntries(
-      Object.entries(artifactsByType).map(([type, artifacts]) => [
+    const groups = Object.groupBy(data.artifacts, (artifact) => artifact.type);
+    const artifacts = Object.fromEntries(
+      ARTIFACT_TYPES.map((type) => [
         type,
-        artifacts.sort((a, b) => b.version - a.version),
+        groups[type]?.toSorted((a, b) => b.version - a.version) ?? [],
       ]),
-    );
+    ) as ArtifactsMap;
 
-    const selectedArtifactIds = {
-      ...(data.project.currentArtifacts ?? {}),
-    } as Partial<Record<ArtifactType, string>>;
-    const gatedArtifact = data.project.gate
-      ? currentArtifacts.find((artifact) => artifact.id === data.project.gate?.selectedArtifactId)
-      : undefined;
-    if (gatedArtifact) {
-      selectedArtifactIds[gatedArtifact.type as ArtifactType] = gatedArtifact.id;
-    }
-
-    for (const [type, artifacts] of Object.entries(sortedArtifacts)) {
-      selectedArtifactIds[type as ArtifactType] ??= artifacts[0]?.id;
-    }
-
+    const activity = describeActivity(data.project, data.currentWork, data.currentUserTask);
     return {
       project: data.project,
-      stage,
-      statusMessage: data.logs[0]?.message ?? STAGE_LABELS[stage],
-      artifacts: sortedArtifacts as ArtifactsMap,
-      selectedArtifactIds,
+      phase: activity.phase,
+      activityLabel: activity.label,
+      activityStatus: activity.status,
+      currentWork: data.currentWork ?? undefined,
+      currentUserTask: data.currentUserTask ?? undefined,
+      works: data.works,
+      userTasks: data.userTasks,
+      progress: data.progress ?? undefined,
+      logs: data.logs,
+      artifacts,
+      approvedArtifactIds: data.project.approvedArtifacts,
     };
   }, [data]);
 
   if (data === undefined) return { status: "loading" };
   if (data === null || !detail) return { status: "not-found" };
   return { status: "ready", detail };
+}
+
+function describeActivity(
+  project: Doc<"projects">,
+  work?: Doc<"works"> | null,
+  task?: Doc<"userTasks"> | null,
+): { phase: Phase; label: string; status: ActivityStatus } {
+  if (project.currentActivity.type === "draft") {
+    return { phase: "sitePlan", label: "Draft", status: "draft" };
+  }
+  if (project.currentActivity.type === "completed") {
+    return { phase: "publishing", label: "Live", status: "completed" };
+  }
+  if (project.currentActivity.type === "userTask" && task) {
+    return { phase: task.phase, label: task.label, status: "waiting" };
+  }
+  if (work) {
+    return {
+      phase: work.phase,
+      label: work.label,
+      status: work.status === "failed" ? "failed" : "working",
+    };
+  }
+  return { phase: "sitePlan", label: "Project unavailable", status: "failed" };
 }

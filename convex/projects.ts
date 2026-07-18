@@ -1,17 +1,8 @@
-/** Dashboard-facing project CRUD and minimal waiting-gate controls. */
-import {
-  type Artifact,
-  type ArtifactType,
-  isRunnableStage,
-  isWaitingStage,
-  nextStage,
-  previousStage,
-} from "@factory/shared";
+import { type Artifact, type ArtifactType } from "@factory/shared";
 import { v } from "convex/values";
-import { mutation, MutationCtx, query } from "./_generated/server";
-import { api } from "./_generated/api";
-import { Doc, Id } from "./_generated/dataModel";
-import { resolveArtifact } from "./utils";
+import type { Doc, Id } from "./_generated/dataModel";
+import { mutation, type MutationCtx, query, type QueryCtx } from "./_generated/server";
+import { insertArtifact, insertWork, resolveArtifact, validateInstructionContract } from "./utils";
 
 const SINGLE_USER = "owner";
 
@@ -21,350 +12,316 @@ export const create = mutation({
     const projectId = await ctx.db.insert("projects", {
       title,
       owner: SINGLE_USER,
-      status: "active",
-      planningCycle: 0,
-      currentStage: "Draft",
-      currentArtifacts: {},
+      currentActivity: { type: "draft" },
+      approvedArtifacts: {},
       settings: { mode: "simple", publishTarget: "wix-managed" },
     });
-
-    const briefArtifact = await ctx.runMutation(api.worker.addArtifact, {
+    const briefId = await insertArtifact(ctx, {
       projectId,
       type: "brief",
       data: brief,
     });
-    if (!briefArtifact) throw new Error("Could not save the project brief");
-    await ctx.db.patch(projectId, {
-      currentArtifacts: { brief: briefArtifact.id as Id<"artifacts"> },
-    });
-
+    await ctx.db.patch(projectId, { approvedArtifacts: { brief: briefId } });
     await ctx.db.insert("logs", {
       projectId,
-      stage: "Draft",
       level: "info",
       message: "Project created",
     });
-
     return projectId;
   },
 });
 
 export const start = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("Project not found");
-    if (project.currentStage !== "Draft") return;
-
-    const brief = await ctx.runQuery(api.worker.getCurrentArtifact, {
-      projectId,
-      type: "brief",
-    });
-    if (!brief) throw new Error("Project brief not found");
-    const currentArtifacts = {
-      ...(project.currentArtifacts ?? {}),
-      brief: brief.id as Id<"artifacts">,
-    };
-    const requestId = await createGenerationRequest(ctx, project, {
-      outputType: "questions",
-      mode: "initial",
-      inputs: currentArtifacts,
-    });
-
-    await ctx.db.patch(projectId, {
-      currentStage: nextStage("Draft"),
-      status: "active",
-      currentArtifacts,
-      pendingGenerationRequestId: requestId,
-    });
-  },
-});
-
-/**
- * Minimal stand-in for future review forms and manual actions. Waiting stages remain
- * non-runnable; the user explicitly advances them and the worker picks up the result.
- */
-export const continueFromGate = mutation({
-  args: {
-    projectId: v.id("projects"),
-    artifactId: v.optional(v.id("artifacts")),
-    stageData: v.optional(v.any()),
-  },
-  handler: async (ctx, { projectId, artifactId, stageData }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("Project not found");
-    if (!isWaitingStage(project.currentStage) || project.currentStage === "Completed") return;
-    let gate = project.gate;
-    if (artifactId) {
-      const artifact = await ctx.db.get(artifactId);
-      if (!artifact || artifact.projectId !== projectId) throw new Error("Version not found");
-      if (gate) {
-        const gatedArtifact = await ctx.db.get(gate.selectedArtifactId);
-        if (!gatedArtifact || gatedArtifact.type !== artifact.type) {
-          throw new Error("That version cannot be used for this decision");
-        }
-      }
-      gate = gate
-        ? { ...gate, selectedArtifactId: artifactId }
-        : {
-            selectedArtifactId: artifactId,
-            kind: artifact.type === "questions" ? ("answers" as const) : ("review" as const),
-          };
-    }
-    if (!gate) throw new Error("There is nothing to continue yet");
-
-    const selectedArtifact = await ctx.db.get(gate.selectedArtifactId);
-    if (!selectedArtifact || selectedArtifact.projectId !== projectId) {
-      throw new Error("The selected version is no longer available");
-    }
-
-    let promotedArtifactId = selectedArtifact._id;
-    if (gate.kind === "answers") {
-      if (!Array.isArray(stageData)) throw new Error("Question answers are required");
-      const answeredArtifact = await ctx.runMutation(api.worker.addArtifact, {
+  args: { projectId: v.id("projects"), brief: v.optional(v.string()) },
+  handler: async (ctx, { projectId, brief }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "draft") return;
+    let briefId = project.approvedArtifacts.brief;
+    if (!briefId) throw new Error("Project brief not found");
+    const currentBrief = await ctx.db.get(briefId);
+    const nextBrief = brief?.trim();
+    if (nextBrief && currentBrief?.data !== nextBrief) {
+      await ctx.db.delete(briefId);
+      briefId = await insertArtifact(ctx, {
         projectId,
-        type: "questions",
-        data: stageData,
-        sourceArtifactId: selectedArtifact._id,
+        type: "brief",
+        data: nextBrief,
       });
-      if (!answeredArtifact) throw new Error("Could not save the answers");
-      promotedArtifactId = answeredArtifact.id as Id<"artifacts">;
+      await ctx.db.patch(projectId, { approvedArtifacts: { brief: briefId } });
     }
 
-    const currentArtifacts = {
-      ...(project.currentArtifacts ?? {}),
-      [selectedArtifact.type]: promotedArtifactId,
-    };
-    const pendingGenerationRequestId =
-      gate.kind === "answers"
-        ? await createSpecificationRequestAfterAnswers(
-            ctx,
-            project,
-            currentArtifacts,
-            selectedArtifact,
-          )
-        : undefined;
-
-    const next = nextStage(project.currentStage);
-    await ctx.db.insert("logs", {
+    const workId = await insertWork(
+      ctx,
       projectId,
-      stage: project.currentStage,
-      level: "info",
-      message: "User continued the project",
-    });
-    await ctx.db.patch(projectId, {
-      currentStage: next,
-      status: "active",
-      leaseWorkerId: undefined,
-      leaseExpiresAt: undefined,
-      currentArtifacts,
-      gate: undefined,
-      pendingGenerationRequestId,
-    });
+      {
+        phase: "sitePlan",
+        label: "Reading your brief",
+        instruction: {
+          type: "generateQuestions",
+          inputs: {
+            brief: { source: "artifact", artifactType: "brief", artifactId: briefId },
+          },
+          revision: { mode: "initial" },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
   },
 });
 
-export const regenerateStage = mutation({
+export const completeUserTask = mutation({
   args: {
-    projectId: v.id("projects"),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    feedback: v.optional(v.any()),
+    userTaskId: v.id("userTasks"),
+    artifactId: v.optional(v.id("artifacts")),
+    subjectArtifactId: v.optional(v.id("artifacts")),
+    resultData: v.optional(v.any()),
   },
-  handler: async (ctx, { projectId, sourceArtifactId, feedback }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("Project not found");
-    if (!isWaitingStage(project.currentStage) || project.currentStage === "Completed") return;
-
-    const selectedArtifactId = sourceArtifactId ?? project.gate?.selectedArtifactId;
-    if (!selectedArtifactId) throw new Error("There is no selected version to regenerate");
-    const source = await ctx.db.get(selectedArtifactId);
-    const gatedArtifact = project.gate ? await ctx.db.get(project.gate.selectedArtifactId) : null;
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.userTaskId);
+    if (!task || task.status !== "open") throw new Error("This task is no longer open");
+    const project = await requireProject(ctx, task.projectId);
     if (
-      !source ||
-      source.projectId !== projectId ||
-      (gatedArtifact && source.type !== gatedArtifact.type)
+      project.currentActivity.type !== "userTask" ||
+      project.currentActivity.userTaskId !== task._id
     ) {
-      throw new Error("The selected version is no longer available");
+      throw new Error("This is not the current task");
     }
-    const note = typeof feedback === "string" ? feedback.trim() : "";
-    const parentRequestId =
-      source.type === "questions"
-        ? (project.pendingGenerationRequestId ?? project.gate?.resumeGenerationRequestId)
-        : undefined;
-    const requestId = await createGenerationRequest(ctx, project, {
-      outputType: source.type,
-      mode: note ? "revise" : "regenerate",
-      inputs: project.currentArtifacts ?? {},
-      baseArtifactId: source._id,
-      feedback: note || undefined,
-      parentRequestId,
+
+    let resultArtifactId: Id<"artifacts"> | undefined;
+    let chosenSubjectArtifactId: Id<"artifacts"> | undefined;
+
+    if (task.result.type === "selectVersion") {
+      if (!args.artifactId) throw new Error("Choose a version before continuing");
+      const artifact = await requireTaskArtifact(ctx, task, args.artifactId);
+      resultArtifactId = artifact._id;
+      chosenSubjectArtifactId = artifact._id;
+    } else if (task.result.type === "submitArtifact") {
+      if (args.resultData === undefined) throw new Error("Task results are required");
+      const subjectId = args.subjectArtifactId ?? task.subjectArtifactId;
+      await requireTaskArtifact(ctx, task, subjectId);
+      chosenSubjectArtifactId = subjectId;
+      resultArtifactId = await insertArtifact(ctx, {
+        projectId: task.projectId,
+        type: task.result.artifactType,
+        data: args.resultData,
+        basedOnArtifactId: task.previousResultArtifactId,
+        createdByUserTaskId: task._id,
+      });
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(task._id, {
+      status: "completed",
+      completedAt: now,
+      chosenSubjectArtifactId,
+      resultArtifactId,
     });
 
-    const target = previousStage(project.currentStage);
-    await ctx.db.insert("logs", {
-      projectId,
-      stage: project.currentStage,
-      level: "info",
-      message: "User asked to regenerate",
-    });
-    await ctx.db.patch(projectId, {
-      currentStage: target,
-      status: "active",
-      progress: 0,
-      leaseWorkerId: undefined,
-      leaseExpiresAt: undefined,
-      lastError: undefined,
-      gate: undefined,
-      pendingGenerationRequestId: requestId,
+    const approvedArtifacts = { ...project.approvedArtifacts };
+    if (chosenSubjectArtifactId) {
+      const selectedSubject = await ctx.db.get(chosenSubjectArtifactId);
+      if (!selectedSubject) throw new Error("The selected version is unavailable");
+      approvedArtifacts[selectedSubject.type] = chosenSubjectArtifactId;
+    }
+    if (resultArtifactId) {
+      const resolved = await ctx.db.get(resultArtifactId);
+      if (!resolved) throw new Error("Task result is unavailable");
+      approvedArtifacts[resolved.type] = resultArtifactId;
+    }
+
+    if (task.onComplete.type === "completeProject") {
+      await ctx.db.patch(project._id, {
+        approvedArtifacts,
+        currentActivity: { type: "completed" },
+      });
+      return;
+    }
+
+    if (!resultArtifactId) throw new Error("This task did not produce the required result");
+    const nextWorkId = await insertWork(
+      ctx,
+      project._id,
+      materializePendingWork(task.onComplete.work, resultArtifactId),
+      "queued",
+    );
+    await ctx.db.patch(project._id, {
+      approvedArtifacts,
+      currentActivity: { type: "work", workId: nextWorkId },
     });
   },
 });
 
-export const selectArtifactVersion = mutation({
-  args: { projectId: v.id("projects"), artifactId: v.id("artifacts") },
-  handler: async (ctx, { projectId, artifactId }) => {
-    const [project, artifact] = await Promise.all([ctx.db.get(projectId), ctx.db.get(artifactId)]);
-    if (!project || !artifact || artifact.projectId !== projectId) {
-      throw new Error("Version not found");
+export const reviseCurrentTask = mutation({
+  args: {
+    userTaskId: v.id("userTasks"),
+    sourceArtifactId: v.id("artifacts"),
+    feedback: v.optional(v.string()),
+  },
+  handler: async (ctx, { userTaskId, sourceArtifactId, feedback }) => {
+    const task = await ctx.db.get(userTaskId);
+    if (!task || task.status !== "open") throw new Error("This task is no longer open");
+    const project = await requireProject(ctx, task.projectId);
+    if (
+      project.currentActivity.type !== "userTask" ||
+      project.currentActivity.userTaskId !== task._id
+    ) {
+      throw new Error("This is not the current task");
     }
-    if (artifact.planningCycle !== project.planningCycle) {
-      throw new Error("That version cannot be selected here");
+    const source = await requireTaskArtifact(ctx, task, sourceArtifactId);
+    if (!source.createdByWorkId) throw new Error("This artifact cannot be regenerated");
+    const producingWork = await ctx.db.get(source.createdByWorkId);
+    if (!producingWork || producingWork.projectId !== project._id) {
+      throw new Error("The original work is unavailable");
     }
-    if (project.gate) {
-      const gatedArtifact = await ctx.db.get(project.gate.selectedArtifactId);
-      if (!gatedArtifact || artifact.type !== gatedArtifact.type) {
-        throw new Error("That version cannot be selected here");
+
+    await cancelTaskAndContinuation(ctx, task);
+    const note = feedback?.trim();
+    const workId = await insertWork(
+      ctx,
+      project._id,
+      {
+        phase: producingWork.phase,
+        label: producingWork.label,
+        instruction: {
+          ...producingWork.instruction,
+          revision: {
+            mode: note ? "revise" : "regenerate",
+            baseArtifactId: source._id,
+            feedback: note || undefined,
+          },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
+  },
+});
+
+export const revisitUserTask = mutation({
+  args: {
+    userTaskId: v.id("userTasks"),
+    artifactId: v.optional(v.id("artifacts")),
+  },
+  handler: async (ctx, { userTaskId, artifactId }) => {
+    const sourceTask = await ctx.db.get(userTaskId);
+    if (!sourceTask || sourceTask.status !== "completed") {
+      throw new Error("Only completed steps can be revisited");
+    }
+    const project = await requireProject(ctx, sourceTask.projectId);
+    await cancelCurrentActivity(ctx, project);
+
+    let subjectArtifactId = sourceTask.chosenSubjectArtifactId ?? sourceTask.subjectArtifactId;
+    if (artifactId) {
+      if (sourceTask.result.type !== "selectVersion") {
+        throw new Error("This task does not select an artifact version");
       }
+      const artifact = await requireTaskArtifact(ctx, sourceTask, artifactId);
+      subjectArtifactId = artifact._id;
     }
-    if (!isWaitingStage(project.currentStage) || project.currentStage === "Completed") return;
-    const gate = project.gate ?? {
-      kind: artifact.type === "questions" ? ("answers" as const) : ("review" as const),
-      selectedArtifactId: artifactId,
-    };
-    await ctx.db.patch(projectId, {
-      gate: { ...gate, selectedArtifactId: artifactId },
+    const newTaskId = await ctx.db.insert("userTasks", {
+      projectId: project._id,
+      phase: sourceTask.phase,
+      label: sourceTask.label,
+      subjectArtifactId,
+      previousResultArtifactId: sourceTask.resultArtifactId,
+      result: sourceTask.result,
+      onComplete: sourceTask.onComplete,
+      status: "open",
+    });
+    await ctx.db.patch(project._id, {
+      currentActivity: { type: "userTask", userTaskId: newTaskId },
     });
   },
 });
 
-type ArtifactManifest = NonNullable<Doc<"projects">["currentArtifacts"]>;
-
-async function createGenerationRequest(
-  ctx: MutationCtx,
-  project: Doc<"projects">,
-  request: {
-    outputType: ArtifactType;
-    mode: "initial" | "regenerate" | "revise";
-    inputs: ArtifactManifest;
-    baseArtifactId?: Id<"artifacts">;
-    feedback?: string;
-    parentRequestId?: Id<"generationRequests">;
-  },
-) {
-  for (const [type, artifactId] of Object.entries(request.inputs)) {
-    const artifact = await ctx.db.get(artifactId);
-    if (
-      !artifact ||
-      artifact.projectId !== project._id ||
-      artifact.type !== type ||
-      artifact.planningCycle !== project.planningCycle
-    ) {
-      throw new Error(`Invalid ${type} input for this generation request`);
-    }
-  }
-  if (request.baseArtifactId) {
-    const base = await ctx.db.get(request.baseArtifactId);
-    if (
-      !base ||
-      base.projectId !== project._id ||
-      base.type !== request.outputType ||
-      base.planningCycle !== project.planningCycle
-    ) {
-      throw new Error("Invalid base version for this generation request");
-    }
-  }
-  if (request.parentRequestId) {
-    const parent = await ctx.db.get(request.parentRequestId);
-    if (!parent || parent.projectId !== project._id) {
-      throw new Error("Invalid parent generation request");
-    }
-  }
-
-  return ctx.db.insert("generationRequests", {
-    projectId: project._id,
-    planningCycle: project.planningCycle,
-    outputType: request.outputType,
-    mode: request.mode,
-    inputs: request.inputs,
-    ...(request.baseArtifactId ? { baseArtifactId: request.baseArtifactId } : {}),
-    ...(request.feedback ? { feedback: request.feedback } : {}),
-    ...(request.parentRequestId ? { parentRequestId: request.parentRequestId } : {}),
-  });
-}
-
-async function createSpecificationRequestAfterAnswers(
-  ctx: MutationCtx,
-  project: Doc<"projects">,
-  inputs: ArtifactManifest,
-  selectedQuestions: Doc<"artifacts">,
-) {
-  let previousRequest = project.pendingGenerationRequestId
-    ? await ctx.db.get(project.pendingGenerationRequestId)
-    : null;
-
-  if (!previousRequest && project.gate?.resumeGenerationRequestId) {
-    previousRequest = await ctx.db.get(project.gate.resumeGenerationRequestId);
-  }
-
-  if (!previousRequest && selectedQuestions.generationRequestId) {
-    const questionRequest = await ctx.db.get(selectedQuestions.generationRequestId);
-    if (questionRequest?.parentRequestId) {
-      previousRequest = await ctx.db.get(questionRequest.parentRequestId);
-    }
-  }
-
-  if (previousRequest?.outputType === "specification") {
-    return createGenerationRequest(ctx, project, {
-      outputType: "specification",
-      mode: previousRequest.mode,
-      inputs,
-      baseArtifactId: previousRequest.baseArtifactId,
-      feedback: previousRequest.feedback,
-      parentRequestId: previousRequest._id,
-    });
-  }
-
-  return createGenerationRequest(ctx, project, {
-    outputType: "specification",
-    mode: "initial",
-    inputs,
-  });
-}
-
-export const retryCurrentStage = mutation({
+export const retryCurrentWork = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, { projectId }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("Project not found");
-    if (!isRunnableStage(project.currentStage)) return;
-
-    await ctx.db.patch(projectId, {
-      status: "active",
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "work") return;
+    const work = await ctx.db.get(project.currentActivity.workId);
+    if (!work || work.status !== "failed" || !work.error?.retryable) return;
+    await ctx.db.patch(work._id, {
+      status: "queued",
+      attempt: work.attempt + 1,
+      error: undefined,
       leaseWorkerId: undefined,
       leaseExpiresAt: undefined,
-      lastError: undefined,
+      startedAt: undefined,
+    });
+  },
+});
+
+export const restartFromBrief = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    const briefId = project.approvedArtifacts.brief;
+    if (!briefId || !(await ctx.db.get(briefId))) throw new Error("Project brief not found");
+
+    const [works, tasks, artifacts, logs] = await Promise.all([
+      ctx.db
+        .query("works")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+      ctx.db
+        .query("userTasks")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+      ctx.db
+        .query("artifacts")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+      ctx.db
+        .query("logs")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+    ]);
+
+    for (const work of works) {
+      const progress = await ctx.db
+        .query("workProgress")
+        .withIndex("by_work", (q) => q.eq("workId", work._id))
+        .collect();
+      for (const item of progress) await ctx.db.delete(item._id);
+    }
+    for (const item of logs) await ctx.db.delete(item._id);
+    for (const item of tasks) await ctx.db.delete(item._id);
+    for (const item of works) await ctx.db.delete(item._id);
+    const deletedStorageIds = new Set<string>();
+    for (const artifact of artifacts) {
+      if (artifact._id === briefId) continue;
+      for (const asset of artifact.assets) {
+        if (deletedStorageIds.has(asset.storageId)) continue;
+        await ctx.storage.delete(asset.storageId);
+        deletedStorageIds.add(asset.storageId);
+      }
+      await ctx.db.delete(artifact._id);
+    }
+
+    await ctx.db.patch(projectId, {
+      approvedArtifacts: { brief: briefId },
+      currentActivity: { type: "draft" },
     });
   },
 });
 
 export const list = query({
   args: {},
-  handler: async (ctx) =>
-    await ctx.db
+  handler: async (ctx) => {
+    const projects = await ctx.db
       .query("projects")
       .withIndex("by_owner", (q) => q.eq("owner", SINGLE_USER))
       .order("desc")
-      .collect(),
+      .collect();
+    return Promise.all(
+      projects.map(async (project) => ({
+        project,
+        activity: await resolveActivity(ctx, project),
+      })),
+    );
+  },
 });
 
 export const detail = query({
@@ -372,25 +329,167 @@ export const detail = query({
   handler: async (ctx, { projectId }) => {
     const project = await ctx.db.get(projectId);
     if (!project) return null;
-    const logs = await ctx.db
-      .query("logs")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .order("desc")
-      .take(20);
-
-    const artifacts = await ctx.db
-      .query("artifacts")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .collect();
-
+    const [works, userTasks, artifacts, logs] = await Promise.all([
+      ctx.db
+        .query("works")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+      ctx.db
+        .query("userTasks")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+      ctx.db
+        .query("artifacts")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect(),
+      ctx.db
+        .query("logs")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .order("desc")
+        .take(30),
+    ]);
+    const activity = project.currentActivity;
+    const currentWork =
+      activity.type === "work" ? works.find((work) => work._id === activity.workId) : undefined;
+    const currentUserTask =
+      activity.type === "userTask"
+        ? userTasks.find((task) => task._id === activity.userTaskId)
+        : undefined;
+    const progress = currentWork
+      ? await ctx.db
+          .query("workProgress")
+          .withIndex("by_work_and_attempt", (q) =>
+            q.eq("workId", currentWork._id).eq("attempt", currentWork.attempt),
+          )
+          .order("desc")
+          .first()
+      : null;
     const resolvedArtifacts: Artifact[] = await Promise.all(
-      artifacts.map((a) => resolveArtifact(ctx, a)),
+      artifacts.map((artifact) => resolveArtifact(ctx, artifact)),
     );
 
     return {
       project,
+      currentWork,
+      currentUserTask,
+      works,
+      userTasks,
+      progress,
       logs,
       artifacts: resolvedArtifacts,
     };
   },
 });
+
+async function requireProject(ctx: MutationCtx, projectId: Id<"projects">) {
+  const project = await ctx.db.get(projectId);
+  if (!project) throw new Error("Project not found");
+  return project;
+}
+
+async function requireTaskArtifact(
+  ctx: MutationCtx,
+  task: Doc<"userTasks">,
+  artifactId: Id<"artifacts">,
+) {
+  const artifact = await ctx.db.get(artifactId);
+  if (!artifact || artifact.projectId !== task.projectId) throw new Error("Version not found");
+  const subject = await ctx.db.get(task.subjectArtifactId);
+  if (!subject || artifact.type !== subject.type) {
+    throw new Error("That version cannot be used for this task");
+  }
+  return artifact;
+}
+
+function materializePendingWork(
+  pendingWork: Extract<Doc<"userTasks">["onComplete"], { type: "startWork" }>["work"],
+  resultArtifactId: Id<"artifacts">,
+) {
+  validateInstructionContract(pendingWork.instruction, "continuation");
+  const inputs: Record<
+    string,
+    {
+      source: "artifact";
+      artifactType: ArtifactType;
+      artifactId: Id<"artifacts">;
+    }
+  > = {};
+  for (const [name, input] of Object.entries(pendingWork.instruction.inputs)) {
+    inputs[name] =
+      input.source === "userTaskResult"
+        ? {
+            source: "artifact",
+            artifactType: input.artifactType,
+            artifactId: resultArtifactId,
+          }
+        : input;
+  }
+
+  return {
+    phase: pendingWork.phase,
+    label: pendingWork.label,
+    instruction: {
+      ...pendingWork.instruction,
+      inputs,
+    },
+  };
+}
+
+async function cancelCurrentActivity(ctx: MutationCtx, project: Doc<"projects">) {
+  if (project.currentActivity.type === "work") {
+    const work = await ctx.db.get(project.currentActivity.workId);
+    if (work?.status === "running") throw new Error("Wait for the current work to finish first");
+    if (work && !["completed", "cancelled"].includes(work.status)) {
+      await ctx.db.patch(work._id, { status: "cancelled" });
+    }
+  }
+  if (project.currentActivity.type === "userTask") {
+    const task = await ctx.db.get(project.currentActivity.userTaskId);
+    if (task?.status === "open") await cancelTaskAndContinuation(ctx, task);
+  }
+}
+
+async function cancelTaskAndContinuation(ctx: MutationCtx, task: Doc<"userTasks">) {
+  await ctx.db.patch(task._id, { status: "cancelled" });
+}
+
+async function resolveActivity(ctx: QueryCtx, project: Doc<"projects">) {
+  if (project.currentActivity.type === "draft") {
+    return {
+      type: "draft" as const,
+      label: "Draft",
+      phase: "sitePlan" as const,
+      status: "waiting" as const,
+      createdAt: project._creationTime,
+    };
+  }
+  if (project.currentActivity.type === "completed") {
+    return {
+      type: "completed" as const,
+      label: "Live",
+      phase: "publishing" as const,
+      status: "completed" as const,
+      createdAt: project._creationTime,
+    };
+  }
+  if (project.currentActivity.type === "work") {
+    const work = await ctx.db.get(project.currentActivity.workId);
+    if (!work) return null;
+    return {
+      type: "work" as const,
+      label: work.label,
+      phase: work.phase,
+      status: work.status,
+      createdAt: work._creationTime,
+    };
+  }
+  const task = await ctx.db.get(project.currentActivity.userTaskId);
+  if (!task) return null;
+  return {
+    type: "userTask" as const,
+    label: task.label,
+    phase: task.phase,
+    status: task.status,
+    createdAt: task._creationTime,
+  };
+}

@@ -1,73 +1,101 @@
-/** Atomic queue operations used by the background worker. */
-import { isRunnableStage, STAGES } from "@factory/shared";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { artifactTypeValidator, stageValidator } from "./schema";
-import { resolveArtifact } from "./utils";
+import {
+  artifactTypeValidator,
+  phaseValidator,
+  userTaskOnCompleteValidator,
+  userTaskResultValidator,
+  workInstructionValidator,
+} from "./schema";
+import { insertArtifact, insertWork, resolveArtifact, validateInstructionContract } from "./utils";
 
-const RUNNABLE_STAGES = STAGES.filter(isRunnableStage);
+const workDraftValidator = v.object({
+  phase: phaseValidator,
+  label: v.string(),
+  instruction: workInstructionValidator,
+});
 
-export const leaseNextRunnable = mutation({
+const workCompletionValidator = v.union(
+  v.object({ type: v.literal("completeProject") }),
+  v.object({ type: v.literal("startWork"), work: workDraftValidator }),
+  v.object({
+    type: v.literal("createUserTask"),
+    task: v.object({
+      phase: phaseValidator,
+      label: v.string(),
+      subjectArtifactId: v.id("artifacts"),
+      previousResultArtifactId: v.optional(v.id("artifacts")),
+      result: userTaskResultValidator,
+      onComplete: userTaskOnCompleteValidator,
+    }),
+  }),
+);
+
+export const leaseNextWork = mutation({
   args: { workerId: v.string(), ttlSeconds: v.number() },
   handler: async (ctx, { workerId, ttlSeconds }) => {
     const now = Date.now();
+    const queued = await ctx.db
+      .query("works")
+      .withIndex("by_status", (q) => q.eq("status", "queued"))
+      .collect();
+    const running = await ctx.db
+      .query("works")
+      .withIndex("by_status", (q) => q.eq("status", "running"))
+      .collect();
+    const candidates = [...queued, ...running.filter((work) => (work.leaseExpiresAt ?? 0) < now)];
 
-    for (const stage of RUNNABLE_STAGES) {
-      const candidates = await ctx.db
-        .query("projects")
-        .withIndex("by_stage", (q) => q.eq("currentStage", stage))
-        .collect();
-      const project = candidates.find(
-        (candidate) =>
-          candidate.status === "active" &&
-          (candidate.leaseWorkerId === undefined || (candidate.leaseExpiresAt ?? 0) < now),
-      );
-      if (!project) continue;
+    for (const work of candidates) {
+      const project = await ctx.db.get(work.projectId);
+      if (
+        !project ||
+        project.currentActivity.type !== "work" ||
+        project.currentActivity.workId !== work._id
+      ) {
+        await ctx.db.patch(work._id, {
+          status: "cancelled",
+          leaseWorkerId: undefined,
+          leaseExpiresAt: undefined,
+        });
+        continue;
+      }
 
-      await ctx.db.patch(project._id, {
+      await ctx.db.patch(work._id, {
+        status: "running",
         leaseWorkerId: workerId,
         leaseExpiresAt: now + ttlSeconds * 1000,
+        startedAt: now,
+        error: undefined,
       });
-
-      const generationRequest = project.pendingGenerationRequestId
-        ? await ctx.db.get(project.pendingGenerationRequestId)
-        : null;
-
       return {
-        id: project._id,
-        title: project.title,
-        currentStage: project.currentStage,
+        id: work._id,
+        projectId: project._id,
+        projectTitle: project.title,
+        phase: work.phase,
+        label: work.label,
+        instruction: work.instruction,
+        attempt: work.attempt,
         settings: project.settings,
-        generationRequest: generationRequest
-          ? {
-              id: generationRequest._id,
-              outputType: generationRequest.outputType,
-              mode: generationRequest.mode,
-              inputs: generationRequest.inputs,
-              baseArtifactId: generationRequest.baseArtifactId,
-              feedback: generationRequest.feedback,
-            }
-          : undefined,
       };
     }
-
     return null;
   },
 });
 
 export const renewLease = mutation({
-  args: { projectId: v.id("projects"), workerId: v.string(), ttlSeconds: v.number() },
-  handler: async (ctx, { projectId, workerId, ttlSeconds }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project || project.leaseWorkerId !== workerId) return;
-    await ctx.db.patch(projectId, { leaseExpiresAt: Date.now() + ttlSeconds * 1000 });
+  args: { workId: v.id("works"), workerId: v.string(), ttlSeconds: v.number() },
+  handler: async (ctx, { workId, workerId, ttlSeconds }) => {
+    const work = await ctx.db.get(workId);
+    if (work?.status !== "running" || work.leaseWorkerId !== workerId) return;
+    await ctx.db.patch(workId, { leaseExpiresAt: Date.now() + ttlSeconds * 1000 });
   },
 });
 
 export const appendLog = mutation({
   args: {
     projectId: v.id("projects"),
-    stage: stageValidator,
+    workId: v.id("works"),
+    attempt: v.number(),
     level: v.union(v.literal("info"), v.literal("warn"), v.literal("error")),
     message: v.string(),
     data: v.optional(v.any()),
@@ -77,219 +105,165 @@ export const appendLog = mutation({
   },
 });
 
-export const addArtifact = mutation({
+export const appendProgress = mutation({
   args: {
     projectId: v.id("projects"),
-    type: artifactTypeValidator,
-    data: v.any(),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    generationRequestId: v.optional(v.id("generationRequests")),
+    workId: v.id("works"),
+    workerId: v.string(),
+    attempt: v.number(),
+    percent: v.number(),
+    message: v.string(),
   },
-  handler: async (ctx, input) => {
-    const existing = await ctx.db
-      .query("artifacts")
-      .withIndex("by_project_and_type", (q) =>
-        q.eq("projectId", input.projectId).eq("type", input.type),
-      )
-      .collect();
-    const project = await ctx.db.get("projects", input.projectId);
-    if (!project) return;
-
-    const version = existing.length + 1;
-    const sourceArtifactId = input.sourceArtifactId;
-    if (sourceArtifactId) {
-      const source = await ctx.db.get(sourceArtifactId);
-      if (
-        !source ||
-        source.projectId !== input.projectId ||
-        source.type !== input.type ||
-        source.planningCycle !== project.planningCycle
-      ) {
-        throw new Error("Artifact source does not match the new version");
-      }
+  handler: async (ctx, { workerId, ...input }) => {
+    const work = await ctx.db.get(input.workId);
+    if (
+      !work ||
+      work.status !== "running" ||
+      work.leaseWorkerId !== workerId ||
+      work.attempt !== input.attempt
+    ) {
+      return;
     }
-    if (input.generationRequestId) {
-      const request = await ctx.db.get(input.generationRequestId);
-      if (
-        !request ||
-        request.projectId !== input.projectId ||
-        project.pendingGenerationRequestId !== request._id
-      ) {
-        throw new Error("Generation request does not belong to this project");
-      }
-
-      const existingOutput = await ctx.db
-        .query("artifacts")
-        .withIndex("by_generation_request_and_type", (q) =>
-          q.eq("generationRequestId", request._id).eq("type", input.type),
-        )
-        .first();
-      if (existingOutput) {
-        return resolveArtifact(ctx, existingOutput);
-      }
-    }
-    const artifactId = await ctx.db.insert("artifacts", {
-      projectId: input.projectId,
-      type: input.type,
-      data: input.data,
-      sourceArtifactId,
-      generationRequestId: input.generationRequestId,
-      version,
-      planningCycle: project.planningCycle,
-      assets: [],
+    await ctx.db.insert("workProgress", {
+      ...input,
+      percent: Math.min(100, Math.max(0, input.percent)),
     });
-
-    return {
-      id: artifactId,
-      type: input.type,
-      data: input.data,
-      version,
-      planningCycle: project.planningCycle,
-      sourceArtifactId,
-      generationRequestId: input.generationRequestId,
-      assets: [],
-    };
-  },
-});
-
-export const setProgress = mutation({
-  args: { projectId: v.id("projects"), progress: v.number() },
-  handler: async (ctx, args) => {
-    await ctx.db.patch("projects", args.projectId, {
-      progress: args.progress,
-    });
-  },
-});
-
-export const getCurrentArtifact = query({
-  args: {
-    projectId: v.id("projects"),
-    type: artifactTypeValidator,
-  },
-  handler: async (ctx, args) => {
-    const project = await ctx.db.get(args.projectId);
-    if (!project) return;
-
-    const currentArtifactId = project.currentArtifacts?.[args.type];
-    if (currentArtifactId) {
-      const currentArtifact = await ctx.db.get(currentArtifactId);
-      if (
-        currentArtifact &&
-        currentArtifact.projectId === args.projectId &&
-        currentArtifact.type === args.type
-      ) {
-        return resolveArtifact(ctx, currentArtifact);
-      }
-    }
-
-    // Backward-compatible fallback for projects created before the manifest was
-    // introduced. The next user decision promotes an explicit pointer.
-    const artifacts = await ctx.db
-      .query("artifacts")
-      .withIndex("by_project_and_type", (q) =>
-        q.eq("projectId", args.projectId).eq("type", args.type),
-      )
-      .collect();
-    const currentCycleArtifacts = artifacts.filter(
-      (artifact) => artifact.planningCycle === project.planningCycle,
-    );
-    if (!currentCycleArtifacts.length) return;
-
-    const artifact = currentCycleArtifacts.toSorted((a, b) => b.version - a.version)[0];
-    return artifact ? resolveArtifact(ctx, artifact) : undefined;
   },
 });
 
 export const getArtifact = query({
-  args: {
-    projectId: v.id("projects"),
-    artifactId: v.id("artifacts"),
-  },
+  args: { projectId: v.id("projects"), artifactId: v.id("artifacts") },
   handler: async (ctx, { projectId, artifactId }) => {
     const artifact = await ctx.db.get(artifactId);
-    if (!artifact || artifact.projectId !== projectId) return;
+    if (!artifact || artifact.projectId !== projectId) return null;
     return resolveArtifact(ctx, artifact);
   },
 });
 
-export const commitResult = mutation({
+export const addArtifact = mutation({
   args: {
     projectId: v.id("projects"),
+    workId: v.id("works"),
     workerId: v.string(),
-    result: v.union(
-      v.object({ kind: v.literal("advance"), next: stageValidator }),
-      v.object({
-        kind: v.literal("awaitArtifact"),
-        next: stageValidator,
-        artifactId: v.id("artifacts"),
-        gateKind: v.union(v.literal("answers"), v.literal("review")),
-      }),
-      v.object({ kind: v.literal("failed"), error: v.string() }),
-    ),
+    outputKey: v.string(),
+    type: artifactTypeValidator,
+    data: v.any(),
+    basedOnArtifactId: v.optional(v.id("artifacts")),
   },
-  handler: async (ctx, { projectId, workerId, result }) => {
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("Project not found");
-
-    if (project.leaseWorkerId !== workerId) return;
-
-    const releaseLease = { leaseWorkerId: undefined, leaseExpiresAt: undefined };
-
-    if (result.kind === "advance") {
-      await ctx.db.patch(projectId, {
-        ...releaseLease,
-        currentStage: result.next,
-        progress: 0,
-        status: result.next === "Completed" ? "completed" : "active",
-        lastError: undefined,
-        gate: undefined,
-        pendingGenerationRequestId: undefined,
-      });
-      return;
+  handler: async (ctx, input) => {
+    const work = await ctx.db.get(input.workId);
+    if (
+      !work ||
+      work.projectId !== input.projectId ||
+      work.status !== "running" ||
+      work.leaseWorkerId !== input.workerId
+    ) {
+      throw new Error("Work no longer owns this artifact output");
     }
-
-    if (result.kind === "awaitArtifact") {
-      const artifact = await ctx.db.get(result.artifactId);
-      if (!artifact || artifact.projectId !== projectId) {
-        throw new Error("The artifact gate points to an invalid artifact");
+    const existing = await ctx.db
+      .query("artifacts")
+      .withIndex("by_work_and_output", (q) =>
+        q.eq("createdByWorkId", input.workId).eq("outputKey", input.outputKey),
+      )
+      .first();
+    if (existing) {
+      if (existing.type !== input.type) {
+        throw new Error("Work output key was reused for another artifact type");
       }
-      const request = project.pendingGenerationRequestId
-        ? await ctx.db.get(project.pendingGenerationRequestId)
-        : null;
-      const requestCompleted =
-        request &&
-        artifact.generationRequestId === request._id &&
-        artifact.type === request.outputType;
+      return resolveArtifact(ctx, existing);
+    }
 
-      await ctx.db.patch(projectId, {
-        ...releaseLease,
-        currentStage: result.next,
-        progress: 0,
-        status: "active",
-        lastError: undefined,
-        gate: {
-          kind: result.gateKind,
-          selectedArtifactId: artifact._id,
-          ...(requestCompleted && request.parentRequestId
-            ? { resumeGenerationRequestId: request.parentRequestId }
-            : {}),
-        },
-        pendingGenerationRequestId: requestCompleted
-          ? undefined
-          : project.pendingGenerationRequestId,
+    const artifactId = await insertArtifact(ctx, {
+      projectId: input.projectId,
+      type: input.type,
+      data: input.data,
+      basedOnArtifactId: input.basedOnArtifactId,
+      createdByWorkId: input.workId,
+      outputKey: input.outputKey,
+    });
+    const artifact = await ctx.db.get(artifactId);
+    if (!artifact) throw new Error("Artifact could not be saved");
+    return resolveArtifact(ctx, artifact);
+  },
+});
+
+export const completeWork = mutation({
+  args: {
+    workId: v.id("works"),
+    workerId: v.string(),
+    completion: workCompletionValidator,
+  },
+  handler: async (ctx, { workId, workerId, completion }) => {
+    const work = await ctx.db.get(workId);
+    if (!work || work.status !== "running" || work.leaseWorkerId !== workerId) return;
+    const project = await ctx.db.get(work.projectId);
+    if (
+      !project ||
+      project.currentActivity.type !== "work" ||
+      project.currentActivity.workId !== workId
+    ) {
+      return;
+    }
+    const outputArtifacts = await ctx.db
+      .query("artifacts")
+      .withIndex("by_work", (q) => q.eq("createdByWorkId", workId))
+      .collect();
+
+    await ctx.db.patch(workId, {
+      status: "completed",
+      outputArtifactIds: outputArtifacts.map((artifact) => artifact._id),
+      completedAt: Date.now(),
+      leaseWorkerId: undefined,
+      leaseExpiresAt: undefined,
+      error: undefined,
+    });
+
+    if (completion.type === "completeProject") {
+      await ctx.db.patch(project._id, { currentActivity: { type: "completed" } });
+      return;
+    }
+    if (completion.type === "startWork") {
+      const nextWorkId = await insertWork(ctx, project._id, completion.work, "queued");
+      await ctx.db.patch(project._id, {
+        currentActivity: { type: "work", workId: nextWorkId },
       });
       return;
     }
 
-    if (result.kind === "failed") {
-      await ctx.db.patch(projectId, {
-        ...releaseLease,
-        progress: 0,
-        lastError: result.error,
-        // Failed work is parked. The lease query only selects active projects, so
-        // another attempt can happen only through the explicit Retry action.
-        status: "failed",
-      });
+    if (completion.task.onComplete.type === "startWork") {
+      validateInstructionContract(completion.task.onComplete.work.instruction, "continuation");
     }
+    const taskId = await ctx.db.insert("userTasks", {
+      projectId: project._id,
+      ...completion.task,
+      status: "open",
+    });
+    await ctx.db.patch(project._id, {
+      currentActivity: { type: "userTask", userTaskId: taskId },
+    });
+  },
+});
+
+export const failWork = mutation({
+  args: {
+    workId: v.id("works"),
+    workerId: v.string(),
+    error: v.string(),
+    technicalDetails: v.optional(v.string()),
+  },
+  handler: async (ctx, { workId, workerId, error, technicalDetails }) => {
+    const work = await ctx.db.get(workId);
+    if (!work || work.status !== "running" || work.leaseWorkerId !== workerId) return;
+    await ctx.db.patch(workId, {
+      status: "failed",
+      leaseWorkerId: undefined,
+      leaseExpiresAt: undefined,
+      error: {
+        message: error,
+        technicalDetails,
+        retryable: true,
+        occurredAt: Date.now(),
+      },
+    });
   },
 });

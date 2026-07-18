@@ -2,7 +2,8 @@ import { z } from "zod";
 
 export const ARTIFACT_TYPES = [
   "brief",
-  "questions",
+  "questionnaire",
+  "questionnaireResponse",
   "specification",
   "design",
   "manualTasks",
@@ -13,18 +14,10 @@ export const ARTIFACT_TYPES = [
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
-export interface GenerationRequest {
-  id: string;
-  outputType: ArtifactType;
-  mode: "initial" | "regenerate" | "revise";
-  inputs: Partial<Record<ArtifactType, string>>;
-  baseArtifactId?: string;
-  feedback?: string;
-}
-
 const artifactTypeMap = {
   brief: {} as string,
-  questions: {} as Question[],
+  questionnaire: {} as Questionnaire,
+  questionnaireResponse: {} as QuestionnaireResponse,
   specification: {} as Specification,
   design: {},
   manualTasks: {},
@@ -42,19 +35,19 @@ export interface Artifact<T extends ArtifactType = any> {
   type: T;
   data: ArtifactData<T>;
   version: number;
-  planningCycle: number;
-  sourceArtifactId?: string;
-  generationRequestId?: string;
+  basedOnArtifactId?: string;
+  createdByWorkId?: string;
+  createdByUserTaskId?: string;
   assets: Asset[];
 }
 
 export interface Asset {
   id: string;
   data: any;
-  url: string;
+  url: string | null;
 }
 
-export const QuestionSchema = z.object({
+export const QuestionDefinitionSchema = z.object({
   id: z.number().describe("A one-based question index"),
   category: z
     .enum(["content", "workflows", "business", "ui", "auth"])
@@ -88,13 +81,24 @@ export const QuestionSchema = z.object({
       "True if the answer is a list of items, for example a list of pages, form fields, or CMS collections. " +
         "When true, options MUST contain your proposed starting list.",
     ),
-  answer: z
-    .string()
-    .nullable()
-    .describe("The answer to the question - Leave this blank! it will be filled by the user"),
 });
 
-export type Question = z.infer<typeof QuestionSchema>;
+export const QuestionnaireSchema = z.object({
+  questions: z.array(QuestionDefinitionSchema).max(10),
+});
+
+export const QuestionnaireResponseSchema = z.object({
+  answers: z.array(
+    z.object({
+      questionId: z.number(),
+      value: z.string(),
+    }),
+  ),
+});
+
+export type QuestionDefinition = z.infer<typeof QuestionDefinitionSchema>;
+export type Questionnaire = z.infer<typeof QuestionnaireSchema>;
+export type QuestionnaireResponse = z.infer<typeof QuestionnaireResponseSchema>;
 
 export const PageSchema = z.object({
   name: z.string().describe("The name of the page"),

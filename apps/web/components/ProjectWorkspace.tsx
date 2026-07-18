@@ -1,18 +1,27 @@
 "use client";
 
-import { Check, CircleAlert, Clock3, Sparkles } from "lucide-react";
-import { isWaitingStage, STAGE_LABELS } from "@factory/shared";
-import type { ProjectDetail } from "@/data/useProjectDetail";
-import { api } from "@convex/_generated/api";
+import { Check, CircleAlert, Clock3, History, Sparkles } from "lucide-react";
 import { useMutation } from "convex/react";
-import { EmptyStageView, STAGE_VIEWS } from "@/components/stages/StageUI";
+import type { Doc } from "@convex/_generated/dataModel";
+import { api } from "@convex/_generated/api";
+import type { ProjectDetail } from "@/data/useProjectDetail";
+import { ActivityView } from "@/components/activities/ActivityView";
 
-export function ProjectWorkspace({ detail }: { detail: ProjectDetail }) {
-  const retryCurrentStage = useMutation(api.projects.retryCurrentStage);
-  const { project, stage } = detail;
-  const completed = stage === "Completed";
-  const waiting = isWaitingStage(stage) && !completed;
-  const StageUI = STAGE_VIEWS[stage] || EmptyStageView;
+export function ProjectWorkspace({
+  detail,
+  viewedTask,
+  onReturnToCurrent,
+}: {
+  detail: ProjectDetail;
+  viewedTask?: Doc<"userTasks">;
+  onReturnToCurrent: () => void;
+}) {
+  const retryCurrentWork = useMutation(api.projects.retryCurrentWork);
+  const historical = viewedTask && viewedTask._id !== detail.currentUserTask?._id;
+  const completed = detail.activityStatus === "completed";
+  const waiting = detail.activityStatus === "waiting" || detail.activityStatus === "draft";
+  const failed = detail.activityStatus === "failed";
+  const label = historical ? viewedTask.label : detail.activityLabel;
 
   return (
     <div>
@@ -20,28 +29,40 @@ export function ProjectWorkspace({ detail }: { detail: ProjectDetail }) {
         <div className="flex items-start gap-4">
           <StatusIcon
             completed={completed}
-            failed={project.status === "failed"}
+            failed={failed}
+            historical={!!historical}
             waiting={waiting}
           />
           <div className="min-w-0 flex-1">
             <p className="text-primary text-[10px] font-bold tracking-widest uppercase">
-              {project.status === "failed"
-                ? "Needs attention"
-                : completed
-                  ? "Project complete"
-                  : waiting
-                    ? "Ready for you"
-                    : "In progress"}
+              {historical
+                ? "Previous step"
+                : failed
+                  ? "Needs attention"
+                  : completed
+                    ? "Project complete"
+                    : waiting
+                      ? "Ready for you"
+                      : "In progress"}
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">
-              {STAGE_LABELS[stage]}
-            </h1>
-            {project.status === "failed" && project.lastError && (
+            <div className="flex items-center justify-between gap-4">
+              <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{label}</h1>
+              {historical && (
+                <button
+                  className="text-primary text-sm font-semibold hover:underline"
+                  onClick={onReturnToCurrent}
+                  type="button"
+                >
+                  Return to current step
+                </button>
+              )}
+            </div>
+            {failed && detail.currentWork?.error && (
               <div className="mt-3 flex w-full items-center gap-3 rounded-lg border border-red-500 bg-red-200/30 p-3">
-                <p className="min-w-0 flex-1 break-words">{project.lastError}</p>
+                <p className="min-w-0 flex-1 break-words">{detail.currentWork.error.message}</p>
                 <button
                   className="shrink-0 rounded bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800"
-                  onClick={() => void retryCurrentStage({ projectId: project._id })}
+                  onClick={() => void retryCurrentWork({ projectId: detail.project._id })}
                   type="button"
                 >
                   Retry this step
@@ -51,7 +72,7 @@ export function ProjectWorkspace({ detail }: { detail: ProjectDetail }) {
           </div>
         </div>
       </section>
-      <StageUI detail={detail} />
+      <ActivityView detail={detail} onReturnToCurrent={onReturnToCurrent} viewedTask={viewedTask} />
     </div>
   );
 }
@@ -59,10 +80,12 @@ export function ProjectWorkspace({ detail }: { detail: ProjectDetail }) {
 function StatusIcon({
   completed,
   failed,
+  historical,
   waiting,
 }: {
   completed: boolean;
   failed: boolean;
+  historical: boolean;
   waiting: boolean;
 }) {
   const className = `grid size-11 shrink-0 place-items-center rounded-full ${
@@ -72,19 +95,19 @@ function StatusIcon({
         ? "bg-[#def3e6] text-[#17693a]"
         : "bg-[#d8e2ff] text-primary"
   }`;
-  if (failed)
-    return (
-      <span className={className}>
-        <CircleAlert size={21} />
-      </span>
-    );
-  if (completed)
-    return (
-      <span className={className}>
-        <Check size={21} />
-      </span>
-    );
   return (
-    <span className={className}>{waiting ? <Clock3 size={20} /> : <Sparkles size={20} />}</span>
+    <span className={className}>
+      {historical ? (
+        <History size={20} />
+      ) : failed ? (
+        <CircleAlert size={21} />
+      ) : completed ? (
+        <Check size={21} />
+      ) : waiting ? (
+        <Clock3 size={20} />
+      ) : (
+        <Sparkles size={20} />
+      )}
+    </span>
   );
 }

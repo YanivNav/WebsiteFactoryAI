@@ -12,9 +12,9 @@ pausing whenever a human is needed and resuming afterwards.
 
 ## The two invariants
 
-**1. This is a Project, not a pipeline.** A project has a current stage, artifacts,
-approvals, logs, and manual tasks. The worker only _advances_ it. There is no
-workflow engine and we do not need one — persisted state in Convex _is_ the engine.
+**1. This is a Project, not a pipeline.** A project points to one current activity:
+worker-owned `Work`, a human-owned `UserTask`, a draft, or completion. Immutable
+artifacts connect activities. Persisted state in Convex is the engine.
 
 **2. The user is a Wix professional, not a software engineer.** This is an **internal
 tool**: the users are Wix website builders who build sites for clients, all day, for a
@@ -28,22 +28,22 @@ them debug an Astro type error either — the point of this tool is throughput.
 
 _(V2 may sell this to actual business owners, who genuinely cannot read anything
 technical. `settings.mode` already encodes both audiences: `developer` is today's
-internal user, `simple` is the future product. Keep `STAGE_LABELS` and the plain-language
+internal user, `simple` is the future product. Keep the plain-language presentation
 layer alive for that — just don't design for it now.)_
 
 ## Rules that are load-bearing
 
-- **`Waiting*` stages are not runnable.** The worker only leases work stages. An
-  approval flips the stage; the worker picks it up next tick. **Never write
-  pause/resume code** — human-in-the-loop already falls out of the data model, and
-  adding a second mechanism would break the first.
+- **The worker only leases queued `Work`.** User tasks are never runnable. Completing
+  a user task executes its persisted `onComplete` action with the result artifact.
 
-- **Every stage reads explicit inputs.** A generation request captures the artifact
-  IDs the stage consumes. No hidden conversational context and no "what the last
-  prompt said."
+- **Every work item reads explicit artifact IDs.** No "latest artifact" lookup, hidden
+  conversational context, or separately stored target stage.
 
-- **Artifacts are append-only.** Never overwrite. A rejected specification produces
-  `v2`; it does not mutate `v1`.
+- **Convex stores a generic work protocol.** Operation input contracts live once in
+  `WORK_DEFINITIONS`; never enumerate operations in the database schema.
+
+- **Artifacts are append-only during normal work.** A revision produces `v2`; it does
+  not mutate `v1`. "Start again from the brief" is the explicit destructive reset.
 
 - **Convex holds the project inputs; GitHub holds the code truth.** A lost local workspace
   is a lost _cache_ — clone the private organization repository, then resume from the
@@ -62,7 +62,7 @@ layer alive for that — just don't design for it now.)_
   documentation before adding or upgrading an SDK integration, and migrate existing
   deprecated calls when encountered.
 
-- **Only `Workspace` touches the filesystem.** No stage handler may import `fs` or
+- **Only `Workspace` touches the filesystem.** No operation may import `fs` or
   spawn a process directly. This is what keeps "laptop" and "container" the same code.
 
 - **Codex is never told "build my website".** It gets the specification, the design,
@@ -70,9 +70,8 @@ layer alive for that — just don't design for it now.)_
 
 ## Consequences of who the user is
 
-- **Review gates are visual.** A Wix builder judges a rendered site — that is literally
-  their craft. They do not review diffs. `WaitingForCodeReview` only exists in
-  `developer` mode.
+- **Artifact review tasks are visual.** A Wix builder judges a rendered site — that is
+  literally their craft. They do not review diffs.
 - **The AI fixes its own build failures.** `RunningChecks` self-heals before escalating.
   Not because the user is incapable, but because making a designer debug a TypeScript
   error is precisely the waste this tool exists to remove. This is core, not polish.
@@ -113,7 +112,8 @@ these or you will hit them.
   - live progress the UI renders → **its own table, one small document per unit of
     work** (`designProgress` is the pattern: one row per screen, patched through
     queued → generating → ready). Same OCC properties as `logs`, but it is *state*;
-  - the `projects` doc is written **only on a real stage transition**.
+  - `workProgress` is append-only and tied to a work attempt;
+  - the `projects` doc is written only when the current activity or approved artifacts change.
 
 - **Logs are narration, never state.** No reader may branch on a log's message or
   `data` to reconstruct what the pipeline is doing — that was tried, it produced
@@ -177,12 +177,12 @@ Stitch design before coding.
 ```
 apps/web/          Next.js dashboard — never touches a repo or filesystem
 convex/            state, queue, realtime feed
-packages/shared/   Stage enum + labels — one definition, used by web AND worker
+packages/shared/   phases, operation IDs, task IDs, and artifact types
 packages/worker/   the only thing with a filesystem
   runner/          JobRunner    (LocalRunner    → Trigger.dev in V2)   — where work runs
   workspace/       Workspace    (LocalWorkspace → RemoteWorkspace)     — where files live
   store/           ProjectStore (ConvexStore    → PostgresStore)       — where state lives
-  stages/          one handler per runnable stage
+  operations/      one handler per work operation
   lib/             hash.ts (provenance), prompts.ts (load + hash prompt files)
   services/        llm/ spec/ stitch/ Codex/ wix/  ← never mixed
                    llm/ resolves LLM_MODEL ("provider:model-id") via the AI SDK, so
@@ -205,26 +205,12 @@ pnpm typecheck
 
 ## Current state
 
-**Phase 1 complete: the walking skeleton runs.** The state machine, the atomic lease,
-approval gates, manual tasks, append-only artifact versioning, the change-request
-queue, and the dashboard are all real and verified end-to-end.
+The worker leases `works`, renews their leases, appends progress per attempt, and
+commits their next activity atomically. Question and specification operations are real;
+later operations are added through the same handler registry. Artifact reviews and
+questionnaires use shared version browsing, with approval persisted only on Continue.
 
-**The stage handlers are FAKE** (`packages/worker/src/stages/*`). They log, pause, and
-emit canned artifacts. `FAKE_WORK_MS` widens the pause so you can kill the worker
-mid-stage. Phases 3–5 replace them one at a time; nothing else should need to move.
-
-Verified, not assumed:
-
-- A worker `kill -9`'d mid-stage leaves a stale lease; a fresh worker reclaims it after
-  the TTL and **redoes the stage from scratch** — safe precisely because stages are
-  deterministic from their inputs.
-- The worker refuses to touch `Waiting*` stages. Approving flips the stage; the worker
-  picks it up. No pause/resume code exists.
-- A rejected/changed artifact produces `v2`. `v1` is never mutated.
-- `Completed` → change request → `GeneratingCode` → … → `Completed`. It is a resting
-  state, not a terminal one.
-
-**Lease TTL is the crash-recovery latency.** Default 300s: a crashed worker's project
-is stuck for up to 5 minutes. That is safe (a slow-but-alive worker is never robbed
-mid-stage) but slow. When code generation gets long in Phase 5, the renew interval —
+**Lease TTL is the crash-recovery latency.** Default 300s: crashed work is stuck for up
+to 5 minutes. That is safe (slow-but-alive work is never robbed) but slow. When code
+generation gets long, the renew interval —
 not the TTL — is what keeps a healthy worker's lease alive.
