@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { Check, LoaderCircle, RotateCcw, X } from "lucide-react";
-import { useMutation } from "convex/react";
-import { PHASE_LABELS, PHASES } from "@factory/shared";
-import type { Id } from "@convex/_generated/dataModel";
-import { api } from "@convex/_generated/api";
-import type { ProjectDetail } from "@/data/useProjectDetail";
+import {Check, LoaderCircle, RotateCcw, X} from "lucide-react";
+import {PHASE_LABELS, PHASES} from "@factory/shared";
+import type {Id} from "@convex/_generated/dataModel";
+import type {ProjectDetail} from "@/data/useProjectDetail";
+import {api} from "@convex/_generated/api";
+import {useMutation} from "convex/react";
+import {useState} from "react";
 
 export function LifecycleTimeline({
   detail,
@@ -26,6 +26,9 @@ export function LifecycleTimeline({
       <h2 className="mb-6 text-[11px] font-bold tracking-[0.1em] text-[#596170] uppercase">
         Project progression
       </h2>
+      {detail.project.currentActivity.type !== "draft" && (
+        <RestartFromBrief detail={detail} onReset={onReset} />
+      )}
       <div className="relative">
         <div className="absolute top-3 bottom-3 left-3 w-px bg-[#c2c6d6]" />
         <ol className="relative space-y-6">
@@ -59,8 +62,8 @@ export function LifecycleTimeline({
                     <div className="mt-2 flex flex-col gap-1">
                       {tasks.map((task) => (
                         <button
-                          className={`truncate rounded px-2 py-1 text-left text-xs transition-colors ${
-                            viewedTaskId === task._id || detail.currentUserTask?._id === task._id
+                          className={`truncate flex items-center gap-1 rounded px-2 py-1 text-left text-xs transition-colors ${
+                            (viewedTaskId ?? detail.currentUserTask?._id) === task._id
                               ? "bg-[#d8e2ff] font-semibold text-[#004395]"
                               : "text-[#596170] hover:bg-white hover:text-[#004395]"
                           }`}
@@ -68,8 +71,8 @@ export function LifecycleTimeline({
                           onClick={() => onViewTask(task._id)}
                           type="button"
                         >
+                          {task.status === "completed" ? <Check size={14} /> : null}
                           {task.label}
-                          {task.status === "completed" && ` · Done`}
                         </button>
                       ))}
                     </div>
@@ -80,9 +83,6 @@ export function LifecycleTimeline({
           })}
         </ol>
       </div>
-      {detail.project.currentActivity.type !== "draft" && (
-        <RestartFromBrief detail={detail} onReset={onReset} />
-      )}
     </aside>
   );
 }
@@ -106,7 +106,7 @@ function RestartFromBrief({ detail, onReset }: { detail: ProjectDetail; onReset:
   return (
     <>
       <button
-        className="text-ink-muted hover:text-primary mt-8 flex items-center gap-2 text-xs font-semibold"
+        className="text-ink-muted hover:text-primary my-3 flex items-center gap-2 text-xs font-semibold"
         onClick={() => setOpen(true)}
         type="button"
       >

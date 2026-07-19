@@ -9,7 +9,7 @@ import type { UserTaskViewProps } from "./UserTaskView";
 import { ActivityActions } from "./ActivityActions";
 import { ArtifactContent } from "./ArtifactContent";
 
-export function ArtifactReviewTask({ detail, task }: UserTaskViewProps) {
+export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtifact }: UserTaskViewProps) {
   const subject = findArtifact(detail, task.subjectArtifactId);
   const { complete, revise, busy } = useUserTask();
   const [revising, setRevising] = useState(false);
@@ -21,7 +21,9 @@ export function ArtifactReviewTask({ detail, task }: UserTaskViewProps) {
   return (
     <ArtifactReview
       approvedArtifactId={detail.approvedArtifactIds[subject.type]}
+      onView={onViewArtifact}
       proposedArtifactId={subject.id}
+      viewedArtifactId={viewedArtifactId}
       renderActions={(artifact) => (
         <>
           {revising && (

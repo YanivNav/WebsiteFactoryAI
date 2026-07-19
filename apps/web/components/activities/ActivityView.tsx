@@ -7,20 +7,23 @@ import { UserTaskView } from "./UserTaskView";
 export function ActivityView({
   detail,
   viewedTask,
-  onReturnToCurrent,
+  viewedArtifactId,
+  onViewArtifact,
 }: {
   detail: ProjectDetail;
   viewedTask?: Doc<"userTasks">;
-  onReturnToCurrent: () => void;
+  viewedArtifactId?: string;
+  onViewArtifact: (artifactId: string) => void;
 }) {
   const task = viewedTask ?? detail.currentUserTask;
   if (task) {
     return (
       <UserTaskView
         detail={detail}
-        onReturnToCurrent={onReturnToCurrent}
         readOnly={task._id !== detail.currentUserTask?._id || task.status !== "open"}
         task={task}
+        viewedArtifactId={viewedArtifactId}
+        onViewArtifact={onViewArtifact}
       />
     );
   }

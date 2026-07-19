@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import type { Artifact, ArtifactType } from "@factory/shared";
 import { ArtifactVersionPicker } from "./ArtifactVersionPicker";
 
@@ -9,6 +9,8 @@ export function ArtifactReview<T extends ArtifactType>({
   proposedArtifactId,
   approvedArtifactId,
   versionLabel,
+  viewedArtifactId,
+  onView,
   renderArtifact,
   renderActions,
 }: {
@@ -16,17 +18,27 @@ export function ArtifactReview<T extends ArtifactType>({
   proposedArtifactId?: string;
   approvedArtifactId?: string;
   versionLabel: string;
+  viewedArtifactId?: string;
+  onView: (artifactId: string) => void;
   renderArtifact: (artifact: Artifact<T>) => ReactNode;
   renderActions?: (artifact: Artifact<T>) => ReactNode;
 }) {
   const initialId = proposedArtifactId ?? approvedArtifactId ?? versions[0]?.id;
-  const [viewedArtifactId, setViewedArtifactId] = useState(initialId);
 
-  useEffect(() => setViewedArtifactId(initialId), [initialId]);
+  // Selection is owned by the workspace so the header (revisit) and this review
+  // agree on the current version. Seed or repair it whenever the versions change.
+  useEffect(() => {
+    if (initialId && !versions.some((version) => version.id === viewedArtifactId)) {
+      onView(initialId);
+    }
+  }, [initialId, versions, viewedArtifactId, onView]);
 
   const artifact = useMemo(
-    () => versions.find((version) => version.id === viewedArtifactId) ?? versions[0],
-    [versions, viewedArtifactId],
+    () =>
+      versions.find((version) => version.id === viewedArtifactId) ??
+      versions.find((version) => version.id === initialId) ??
+      versions[0],
+    [versions, viewedArtifactId, initialId],
   );
   if (!artifact) return null;
 
@@ -37,7 +49,7 @@ export function ArtifactReview<T extends ArtifactType>({
           <ArtifactVersionPicker
             approvedArtifactId={approvedArtifactId}
             label={versionLabel}
-            onView={setViewedArtifactId}
+            onView={onView}
             proposedArtifactId={proposedArtifactId}
             versions={versions}
             viewedArtifactId={artifact.id}

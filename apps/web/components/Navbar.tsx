@@ -52,10 +52,8 @@ export function Navbar() {
 
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const createProject = useMutation(api.projects.create);
-  const startProject = useMutation(api.projects.start);
   const router = useRouter();
   const [title, setTitle] = useState("");
-  const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -66,11 +64,10 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (!title.trim() || !brief.trim()) return;
+    if (!title.trim()) return;
     setBusy(true);
     try {
-      const projectId = await createProject({ title: title.trim(), brief: brief.trim() });
-      await startProject({ projectId });
+      const projectId = await createProject({ title: title.trim() });
       onClose();
       router.push(`/projects/${projectId}`);
     } finally {
@@ -102,29 +99,14 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <label className="mt-5 block text-xs font-semibold tracking-[0.04em]">
-          Client / Site Name
+          Site Name
           <input
             autoFocus
             className={field}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Enter client name"
+            placeholder="Enter site name"
             required
             value={title}
-          />
-        </label>
-        <label className="mt-5 block text-xs font-semibold tracking-[0.04em]">
-          Project Description
-          <span className="my-2 block font-normal tracking-normal text-[#3e4654]">
-            Describe the client’s business. What do they do, and what should visitors be able to do
-            on the site?
-          </span>
-          <textarea
-            className={`${field} min-h-[120px] resize-y leading-6`}
-            onChange={(event) => setBrief(event.target.value)}
-            placeholder="e.g., A boutique organic bakery in Brooklyn. They need a site to showcase their daily menu, handle pre-orders, and allow customers to book cake tasting appointments."
-            required
-            rows={5}
-            value={brief}
           />
         </label>
         <div className="mt-8 flex items-center justify-end gap-7 md:mt-11">
@@ -138,7 +120,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           </button>
           <button
             className="bg-primary inline-flex min-h-9 min-w-20 items-center justify-center gap-2 rounded px-4 text-xs font-semibold text-white transition-colors hover:bg-[#064aa0] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={busy || !title.trim() || !brief.trim()}
+            disabled={busy || !title.trim()}
             type="submit"
           >
             {busy ? (

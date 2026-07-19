@@ -1,20 +1,18 @@
 "use client";
 
-import { RotateCcw } from "lucide-react";
-import type { Doc, Id } from "@convex/_generated/dataModel";
-import { ArtifactReview } from "@/components/ArtifactReview";
-import type { ProjectDetail } from "@/data/useProjectDetail";
-import { useUserTask } from "@/data/useUserTask";
-import { ActivityActions } from "./ActivityActions";
-import { ArtifactContent } from "./ArtifactContent";
-import { ArtifactReviewTask } from "./ArtifactReviewTask";
-import { ArtifactSubmissionTask } from "./ArtifactSubmissionTask";
+import type {Doc} from "@convex/_generated/dataModel";
+import {ArtifactReview} from "@/components/ArtifactReview";
+import type {ProjectDetail} from "@/data/useProjectDetail";
+import {ArtifactContent} from "./ArtifactContent";
+import {ArtifactReviewTask} from "./ArtifactReviewTask";
+import {ArtifactSubmissionTask} from "./ArtifactSubmissionTask";
 
 export interface UserTaskViewProps {
   detail: ProjectDetail;
   task: Doc<"userTasks">;
   readOnly: boolean;
-  onReturnToCurrent: () => void;
+  viewedArtifactId?: string;
+  onViewArtifact: (artifactId: string) => void;
 }
 
 export function UserTaskView(props: UserTaskViewProps) {
@@ -25,37 +23,23 @@ export function UserTaskView(props: UserTaskViewProps) {
   return <ArtifactSubmissionTask {...props} />;
 }
 
-function CompletedUserTaskView({ detail, task, onReturnToCurrent }: UserTaskViewProps) {
+function CompletedUserTaskView({ detail, task, viewedArtifactId, onViewArtifact }: UserTaskViewProps) {
   const result = findArtifact(detail, task.resultArtifactId);
   const subject = findArtifact(detail, task.chosenSubjectArtifactId ?? task.subjectArtifactId);
-  const { revisit, busy } = useUserTask();
   if (!result) return <MissingArtifact />;
   const versions = detail.artifacts[result.type];
 
   return (
     <ArtifactReview
       approvedArtifactId={detail.approvedArtifactIds[result.type]}
+      onView={onViewArtifact}
       proposedArtifactId={result.id}
-      renderActions={(artifact) => (
-        <ActivityActions
-          primary={{
-            label: "Go back and revise this",
-            icon: <RotateCcw size={16} />,
-            loading: busy === "revisit",
-            disabled: busy !== null,
-            onClick: () =>
-              void revisit(
-                task._id,
-                task.result.type === "selectVersion" ? (artifact.id as Id<"artifacts">) : undefined,
-              ).then(onReturnToCurrent),
-          }}
-        />
-      )}
       renderArtifact={(artifact) => (
         <ArtifactContent artifact={artifact} subject={subject} versions={versions} />
       )}
       versionLabel="Versions"
       versions={versions}
+      viewedArtifactId={viewedArtifactId}
     />
   );
 }

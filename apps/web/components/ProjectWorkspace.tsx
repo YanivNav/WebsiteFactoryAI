@@ -1,11 +1,13 @@
 "use client";
 
-import { Check, CircleAlert, Clock3, History, Sparkles } from "lucide-react";
+import {ArrowLeft, Check, CircleAlert, Clock3, History, LoaderCircle, RotateCcw, Sparkles } from "lucide-react";
+import { useState } from "react";
 import { useMutation } from "convex/react";
-import type { Doc } from "@convex/_generated/dataModel";
+import type {Doc, Id} from "@convex/_generated/dataModel";
 import { api } from "@convex/_generated/api";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import { ActivityView } from "@/components/activities/ActivityView";
+import {useUserTask} from "@/data/useUserTask";
 
 export function ProjectWorkspace({
   detail,
@@ -17,11 +19,17 @@ export function ProjectWorkspace({
   onReturnToCurrent: () => void;
 }) {
   const retryCurrentWork = useMutation(api.projects.retryCurrentWork);
+  const {revisit, busy: revisitBusy} = useUserTask();
   const historical = viewedTask && viewedTask._id !== detail.currentUserTask?._id;
   const completed = detail.activityStatus === "completed";
   const waiting = detail.activityStatus === "waiting" || detail.activityStatus === "draft";
   const failed = detail.activityStatus === "failed";
   const label = historical ? viewedTask.label : detail.activityLabel;
+
+  const [viewedArtifactId, setViewedArtifactId] = useState<string>();
+  const artifact = viewedArtifactId
+    ? Object.values(detail.artifacts).flat().find((candidate) => candidate.id === viewedArtifactId)
+    : undefined;
 
   return (
     <div>
@@ -34,9 +42,18 @@ export function ProjectWorkspace({
             waiting={waiting}
           />
           <div className="min-w-0 flex-1">
+            {historical && (
+              <button
+                className="flex items-center gap-1 text-sm hover:underline cursor-pointer"
+                onClick={onReturnToCurrent}
+                type="button"
+              >
+                <ArrowLeft size={14} /> Return to current step
+              </button>
+            )}
             <p className="text-primary text-[10px] font-bold tracking-widest uppercase">
               {historical
-                ? "Previous step"
+                ? null
                 : failed
                   ? "Needs attention"
                   : completed
@@ -47,17 +64,26 @@ export function ProjectWorkspace({
             </p>
             <div className="flex items-center justify-between gap-4">
               <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{label}</h1>
-              {historical && (
+              {historical &&
                 <button
-                  className="text-primary text-sm font-semibold hover:underline"
-                  onClick={onReturnToCurrent}
                   type="button"
+                  onClick={() => {
+                    void revisit(
+                      viewedTask._id,
+                      viewedTask.result.type === "selectVersion"
+                        ? (artifact?.id as Id<"artifacts"> | undefined)
+                        : undefined,
+                    ).then(onReturnToCurrent);
+                  }}
+                  disabled={!!revisitBusy}
+                  className="bg-primary flex items-center gap-2 rounded px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90 disabled:opacity-50"
                 >
-                  Return to current step
+                  {revisitBusy ? <LoaderCircle className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                  Go back and revise this
                 </button>
-              )}
+              }
             </div>
-            {failed && detail.currentWork?.error && (
+            {failed && detail.currentWork?.error && !historical && (
               <div className="mt-3 flex w-full items-center gap-3 rounded-lg border border-red-500 bg-red-200/30 p-3">
                 <p className="min-w-0 flex-1 break-words">{detail.currentWork.error.message}</p>
                 <button
@@ -72,7 +98,12 @@ export function ProjectWorkspace({
           </div>
         </div>
       </section>
-      <ActivityView detail={detail} onReturnToCurrent={onReturnToCurrent} viewedTask={viewedTask} />
+      <ActivityView
+        detail={detail}
+        viewedTask={viewedTask}
+        viewedArtifactId={viewedArtifactId}
+        onViewArtifact={setViewedArtifactId}
+      />
     </div>
   );
 }
@@ -89,7 +120,7 @@ function StatusIcon({
   waiting: boolean;
 }) {
   const className = `grid size-11 shrink-0 place-items-center rounded-full ${
-    failed
+    failed && !historical
       ? "bg-[#f8d9d6] text-[#a82922]"
       : completed
         ? "bg-[#def3e6] text-[#17693a]"

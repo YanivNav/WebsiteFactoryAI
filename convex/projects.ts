@@ -7,8 +7,8 @@ import { insertArtifact, insertWork, resolveArtifact, validateInstructionContrac
 const SINGLE_USER = "owner";
 
 export const create = mutation({
-  args: { title: v.string(), brief: v.string() },
-  handler: async (ctx, { title, brief }) => {
+  args: { title: v.string() },
+  handler: async (ctx, { title }) => {
     const projectId = await ctx.db.insert("projects", {
       title,
       owner: SINGLE_USER,
@@ -16,12 +16,6 @@ export const create = mutation({
       approvedArtifacts: {},
       settings: { mode: "simple", publishTarget: "wix-managed" },
     });
-    const briefId = await insertArtifact(ctx, {
-      projectId,
-      type: "brief",
-      data: brief,
-    });
-    await ctx.db.patch(projectId, { approvedArtifacts: { brief: briefId } });
     await ctx.db.insert("logs", {
       projectId,
       level: "info",
@@ -32,13 +26,12 @@ export const create = mutation({
 });
 
 export const start = mutation({
-  args: { projectId: v.id("projects"), brief: v.optional(v.string()) },
+  args: { projectId: v.id("projects"), brief: v.string() },
   handler: async (ctx, { projectId, brief }) => {
     const project = await requireProject(ctx, projectId);
     if (project.currentActivity.type !== "draft") return;
     let briefId = project.approvedArtifacts.brief;
-    if (!briefId) throw new Error("Project brief not found");
-    const currentBrief = await ctx.db.get(briefId);
+    const currentBrief = briefId ? await ctx.db.get(briefId) : undefined;
     const nextBrief = brief?.trim();
     if (nextBrief && currentBrief?.data !== nextBrief) {
       await ctx.db.delete(briefId);
@@ -229,6 +222,9 @@ export const revisitUserTask = mutation({
       onComplete: sourceTask.onComplete,
       status: "open",
     });
+    // The revisit supersedes the original completed step. Retire it so the timeline
+    // shows a single active instance instead of a completed + current duplicate.
+    await ctx.db.patch(sourceTask._id, { status: "cancelled" });
     await ctx.db.patch(project._id, {
       currentActivity: { type: "userTask", userTaskId: newTaskId },
     });

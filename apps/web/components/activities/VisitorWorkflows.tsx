@@ -64,12 +64,10 @@ export function VisitorWorkflows({ workflows }: { workflows: VisitorWorkflow[] }
                   <span className="border-primary text-primary relative z-10 grid size-6 shrink-0 place-items-center rounded-full border bg-white text-[11px] font-bold">
                     {stepIndex + 1}
                   </span>
-                  <div className="min-w-0 flex-1 pt-0.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs uppercase text-ink-muted">{ACTION_LABELS[step.action.type]}</div>
                     <p className="text-ink text-sm leading-relaxed">{step.description}</p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <span className="border-outline text-ink-muted rounded border bg-white px-2 py-0.5 text-[11px] font-medium">
-                        {ACTION_LABELS[step.action.type]}
-                      </span>
                       {step.requiresManualSetup && (
                         <span className="text-ink-muted flex items-center gap-1 text-[11px] font-medium">
                           <Settings2 size={12} /> Wix setup needed

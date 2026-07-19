@@ -6,7 +6,7 @@ import { useUserTask } from "@/data/useUserTask";
 import type { UserTaskViewProps } from "./UserTaskView";
 import { ArtifactEditor } from "./ArtifactContent";
 
-export function ArtifactSubmissionTask({ detail, task }: UserTaskViewProps) {
+export function ArtifactSubmissionTask({ detail, task, viewedArtifactId, onViewArtifact }: UserTaskViewProps) {
   const subject = findArtifact(detail, task.subjectArtifactId);
   const previousResult = findArtifact(detail, task.previousResultArtifactId);
   const { complete, revise, busy } = useUserTask();
@@ -16,7 +16,9 @@ export function ArtifactSubmissionTask({ detail, task }: UserTaskViewProps) {
 
   return (
     <ArtifactReview
+      onView={onViewArtifact}
       proposedArtifactId={subject.id}
+      viewedArtifactId={viewedArtifactId}
       renderArtifact={(artifact) => (
         <ArtifactEditor
           artifact={artifact}

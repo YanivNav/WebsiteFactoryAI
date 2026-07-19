@@ -27,7 +27,8 @@ export function DraftActivity({ detail }: { detail: ProjectDetail }) {
     <section className="border-outline rounded border bg-white p-5">
       <h2 className="text-ink text-lg font-semibold">Project brief</h2>
       <p className="text-ink-muted mt-1 text-sm">
-        Update the brief before starting the planning process again.
+        {briefArtifact ? 'Update the brief before starting the planning process again.'
+          : 'Explain what this website is about, what it displays and its functionality.'}
       </p>
       <textarea
         className="border-outline bg-canvas text-ink focus:border-primary focus:ring-primary mt-4 block min-h-48 w-full rounded border px-3 py-2 text-sm leading-relaxed outline-none focus:ring-1"
