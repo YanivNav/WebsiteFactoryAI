@@ -3,11 +3,10 @@ import { mutation, query } from "./_generated/server";
 import {
   artifactTypeValidator,
   phaseValidator,
-  userTaskOnCompleteValidator,
   userTaskResultValidator,
   workInstructionValidator,
 } from "./schema";
-import { insertArtifact, insertWork, resolveArtifact, validateInstructionContract } from "./utils";
+import { insertArtifact, insertWork, resolveArtifact } from "./utils";
 
 const workDraftValidator = v.object({
   phase: phaseValidator,
@@ -26,7 +25,6 @@ const workCompletionValidator = v.union(
       subjectArtifactId: v.id("artifacts"),
       previousResultArtifactId: v.optional(v.id("artifacts")),
       result: userTaskResultValidator,
-      onComplete: userTaskOnCompleteValidator,
     }),
   }),
 );
@@ -267,9 +265,6 @@ export const completeWork = mutation({
       return;
     }
 
-    if (completion.task.onComplete.type === "startWork") {
-      validateInstructionContract(completion.task.onComplete.work.instruction, "continuation");
-    }
     const taskId = await ctx.db.insert("userTasks", {
       projectId: project._id,
       ...completion.task,

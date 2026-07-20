@@ -47,29 +47,6 @@ ${
         label: "A few quick questions",
         subjectArtifactId: artifact.id,
         result: { type: "submitArtifact", artifactType: "questionnaireResponse" },
-        onComplete: {
-          type: "startWork",
-          work: {
-            phase: "sitePlan",
-            label: "Planning your site",
-            instruction: {
-              type: "generateSpecification",
-              inputs: {
-                brief: { source: "artifact", artifactType: "brief", artifactId: brief.id },
-                questionnaire: {
-                  source: "artifact",
-                  artifactType: "questionnaire",
-                  artifactId: artifact.id,
-                },
-                questionnaireResponse: {
-                  source: "userTaskResult",
-                  artifactType: "questionnaireResponse",
-                },
-              },
-              revision: { mode: "initial" },
-            },
-          },
-        },
       },
     };
   },

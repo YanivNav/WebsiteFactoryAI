@@ -35,11 +35,6 @@ export type ArtifactInput<T extends ArtifactType> = {
   artifactId: string;
 };
 
-export type UserTaskResultInput<T extends ArtifactType> = {
-  source: "userTaskResult";
-  artifactType: T;
-};
-
 type InputArtifactType<
   K extends WorkOperation,
   N extends keyof (typeof WORK_DEFINITIONS)[K]["inputs"],
@@ -47,50 +42,24 @@ type InputArtifactType<
 
 type InputName<K extends WorkOperation> = keyof (typeof WORK_DEFINITIONS)[K]["inputs"];
 
-type ReadyWorkInputs<K extends WorkOperation> = {
-  [Name in InputName<K>]: ArtifactInput<InputArtifactType<K, Name>>;
-};
-
-type ContinuationWorkInputs<K extends WorkOperation> = {
-  [PendingName in InputName<K>]: {
-    [Name in InputName<K>]: Name extends PendingName
-      ? UserTaskResultInput<InputArtifactType<K, Name>>
-      : ArtifactInput<InputArtifactType<K, Name>>;
-  };
-}[InputName<K>];
-
-type WorkInputs<
-  K extends WorkOperation,
-  State extends "ready" | "pending",
-> = State extends "pending" ? ContinuationWorkInputs<K> : ReadyWorkInputs<K>;
-
-export type WorkInstruction<
-  K extends WorkOperation = WorkOperation,
-  State extends "ready" | "pending" = "ready",
-> = {
+export type WorkInstruction<K extends WorkOperation = WorkOperation> = {
   [Operation in K]: {
     type: Operation;
-    inputs: WorkInputs<Operation, State>;
+    inputs: {
+      [Name in InputName<Operation>]: ArtifactInput<InputArtifactType<Operation, Name>>;
+    };
     revision?: WorkRevision;
   };
 }[K];
 
-export type WorkDraft<
-  K extends WorkOperation = WorkOperation,
-  State extends "ready" | "pending" = "ready",
-> = {
+export type WorkDraft<K extends WorkOperation = WorkOperation> = {
   phase: Phase;
   label: string;
-  instruction: WorkInstruction<K, State>;
+  instruction: WorkInstruction<K>;
 };
 
 export type UserTaskResult =
   { type: "selectVersion" } | { type: "submitArtifact"; artifactType: ArtifactType };
-
-export type WorkContinuationDraft = WorkDraft<WorkOperation, "pending">;
-
-export type UserTaskOnComplete =
-  { type: "completeProject" } | { type: "startWork"; work: WorkContinuationDraft };
 
 export type UserTaskDraft = {
   phase: Phase;
@@ -98,7 +67,6 @@ export type UserTaskDraft = {
   subjectArtifactId: string;
   previousResultArtifactId?: string;
   result: UserTaskResult;
-  onComplete: UserTaskOnComplete;
 };
 
 export type WorkCompletion =

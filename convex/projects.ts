@@ -1,8 +1,8 @@
-import { type Artifact, type ArtifactType } from "@factory/shared";
+import { type Artifact, type ArtifactType, OPERATION_LABEL, OPERATION_PHASE, WORK_DEFINITIONS, type NextWork } from "@factory/shared";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, type MutationCtx, query, type QueryCtx } from "./_generated/server";
-import { insertArtifact, insertWork, resolveArtifact, validateInstructionContract } from "./utils";
+import { insertArtifact, insertWork, resolveArtifact } from "./utils";
 
 const SINGLE_USER = "owner";
 
@@ -69,6 +69,10 @@ export const completeUserTask = mutation({
     artifactId: v.optional(v.id("artifacts")),
     subjectArtifactId: v.optional(v.id("artifacts")),
     resultData: v.optional(v.any()),
+    nextWork: v.union(
+      v.literal("completeProject"),
+      ...(Object.keys(WORK_DEFINITIONS) as Array<keyof typeof WORK_DEFINITIONS>).map((k) => v.literal(k)),
+    ),
   },
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.userTaskId);
@@ -123,7 +127,7 @@ export const completeUserTask = mutation({
       approvedArtifacts[resolved.type] = resultArtifactId;
     }
 
-    if (task.onComplete.type === "completeProject") {
+    if (args.nextWork === "completeProject") {
       await ctx.db.patch(project._id, {
         approvedArtifacts,
         currentActivity: { type: "completed" },
@@ -131,13 +135,29 @@ export const completeUserTask = mutation({
       return;
     }
 
-    if (!resultArtifactId) throw new Error("This task did not produce the required result");
-    const nextWorkId = await insertWork(
-      ctx,
-      project._id,
-      materializePendingWork(task.onComplete.work, resultArtifactId),
-      "queued",
-    );
+    const definition = WORK_DEFINITIONS[args.nextWork];
+    const inputs: Record<string, { source: "artifact"; artifactType: ArtifactType; artifactId: Id<"artifacts"> }> = {};
+    for (const [name, expectedType] of Object.entries(definition.inputs) as [string, ArtifactType][]) {
+      // If this input's type matches the task result, use the newly created/selected artifact.
+      const useResult =
+        resultArtifactId &&
+        (task.result.type === "submitArtifact"
+          ? expectedType === task.result.artifactType
+          : expectedType === (chosenSubjectArtifactId ? (await ctx.db.get(chosenSubjectArtifactId))?.type : undefined));
+
+      const artifactId: Id<"artifacts"> | undefined = useResult
+        ? resultArtifactId
+        : (approvedArtifacts[expectedType] as Id<"artifacts"> | undefined);
+
+      if (!artifactId) throw new Error(`Missing input ${name} (${expectedType}) for ${args.nextWork}`);
+      inputs[name] = { source: "artifact", artifactType: expectedType, artifactId };
+    }
+
+    const nextWorkId = await insertWork(ctx, project._id, {
+      phase: OPERATION_PHASE[args.nextWork],
+      label: OPERATION_LABEL[args.nextWork],
+      instruction: { type: args.nextWork, inputs },
+    }, "queued");
     await ctx.db.patch(project._id, {
       approvedArtifacts,
       currentActivity: { type: "work", workId: nextWorkId },
@@ -250,7 +270,6 @@ export const revisitUserTask = mutation({
       subjectArtifactId,
       previousResultArtifactId: sourceTask.resultArtifactId,
       result: sourceTask.result,
-      onComplete: sourceTask.onComplete,
       status: "open",
     });
     // The revisit supersedes the original completed step. Retire it so the timeline
@@ -463,40 +482,6 @@ async function requireTaskArtifact(
     throw new Error("That version cannot be used for this task");
   }
   return artifact;
-}
-
-function materializePendingWork(
-  pendingWork: Extract<Doc<"userTasks">["onComplete"], { type: "startWork" }>["work"],
-  resultArtifactId: Id<"artifacts">,
-) {
-  validateInstructionContract(pendingWork.instruction, "continuation");
-  const inputs: Record<
-    string,
-    {
-      source: "artifact";
-      artifactType: ArtifactType;
-      artifactId: Id<"artifacts">;
-    }
-  > = {};
-  for (const [name, input] of Object.entries(pendingWork.instruction.inputs)) {
-    inputs[name] =
-      input.source === "userTaskResult"
-        ? {
-            source: "artifact",
-            artifactType: input.artifactType,
-            artifactId: resultArtifactId,
-          }
-        : input;
-  }
-
-  return {
-    phase: pendingWork.phase,
-    label: pendingWork.label,
-    instruction: {
-      ...pendingWork.instruction,
-      inputs,
-    },
-  };
 }
 
 async function cancelCurrentActivity(ctx: MutationCtx, project: Doc<"projects">) {

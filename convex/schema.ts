@@ -29,36 +29,11 @@ export const artifactInputValidator = v.object({
   artifactId: v.id("artifacts"),
 });
 
-export const userTaskResultInputValidator = v.object({
-  source: v.literal("userTaskResult"),
-  artifactType: artifactTypeValidator,
-});
-
 export const workInstructionValidator = v.object({
   type: v.string(),
   inputs: v.record(v.string(), artifactInputValidator),
   revision: v.optional(revisionValidator),
 });
-
-export const continuationInstructionValidator = v.object({
-  type: v.string(),
-  inputs: v.record(v.string(), v.union(artifactInputValidator, userTaskResultInputValidator)),
-  revision: v.optional(revisionValidator),
-});
-
-export const pendingWorkValidator = v.object({
-  phase: phaseValidator,
-  label: v.string(),
-  instruction: continuationInstructionValidator,
-});
-
-export const userTaskOnCompleteValidator = v.union(
-  v.object({ type: v.literal("completeProject") }),
-  v.object({
-    type: v.literal("startWork"),
-    work: pendingWorkValidator,
-  }),
-);
 
 const assetSchema = v.object({
   id: v.string(),
@@ -138,7 +113,6 @@ export default defineSchema({
     subjectArtifactId: v.id("artifacts"),
     previousResultArtifactId: v.optional(v.id("artifacts")),
     result: userTaskResultValidator,
-    onComplete: userTaskOnCompleteValidator,
     status: v.union(v.literal("open"), v.literal("completed"), v.literal("cancelled")),
     chosenSubjectArtifactId: v.optional(v.id("artifacts")),
     resultArtifactId: v.optional(v.id("artifacts")),

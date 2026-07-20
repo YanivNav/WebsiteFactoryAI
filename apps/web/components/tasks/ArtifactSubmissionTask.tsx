@@ -4,7 +4,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { ArtifactReview } from "@/components/ArtifactReview";
 import { useUserTask } from "@/data/useUserTask";
 import type { UserTaskViewProps } from "./UserTaskView";
-import { ArtifactEditor } from "./ArtifactContent";
+import { ArtifactEditor } from "../activities/ArtifactContent";
 
 export function ArtifactSubmissionTask({ detail, task, viewedArtifactId, onViewArtifact }: UserTaskViewProps) {
   const subject = findArtifact(detail, task.subjectArtifactId);
@@ -34,6 +34,7 @@ export function ArtifactSubmissionTask({ detail, task, viewedArtifactId, onViewA
               userTaskId: task._id,
               subjectArtifactId: artifact.id as Id<"artifacts">,
               resultData,
+              nextWork: "generateSpecification",
             })
           }
           previousResult={previousResult}

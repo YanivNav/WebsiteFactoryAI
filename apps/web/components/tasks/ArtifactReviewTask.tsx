@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 import { CheckCircle2, PencilLine } from "lucide-react";
+import type { ArtifactType, NextWork } from "@factory/shared";
 import type { Id } from "@convex/_generated/dataModel";
 import { ArtifactReview } from "@/components/ArtifactReview";
 import { useUserTask } from "@/data/useUserTask";
 import type { UserTaskViewProps } from "./UserTaskView";
-import { ActivityActions } from "./ActivityActions";
-import { ArtifactContent } from "./ArtifactContent";
+import { ActivityActions } from "../activities/ActivityActions";
+import { ArtifactContent } from "../activities/ArtifactContent";
+
+const NEXT_WORK_FOR_ARTIFACT: Partial<Record<ArtifactType, NextWork>> = {
+  specification: "generateDesign",
+  design: "completeProject",
+};
 
 export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtifact }: UserTaskViewProps) {
   const subject = findArtifact(detail, task.subjectArtifactId);
@@ -17,6 +23,8 @@ export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtif
 
   if (!subject) return <MissingArtifact />;
   const versions = detail.artifacts[subject.type] ?? [];
+  const nextWork = NEXT_WORK_FOR_ARTIFACT[subject.type];
+  if (!nextWork) return <div className="p-4 text-sm text-red-700">Unknown next step for: {subject.type}</div>;
 
   return (
     <ArtifactReview
@@ -49,6 +57,7 @@ export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtif
                 void complete({
                   userTaskId: task._id,
                   artifactId: artifact.id as Id<"artifacts">,
+                  nextWork,
                 }),
             }}
             secondary={

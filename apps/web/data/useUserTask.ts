@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import type { NextWork } from "@factory/shared";
 
 type TaskAction = "complete" | "revise" | "revisit";
 
@@ -28,6 +29,7 @@ export function useUserTask() {
       artifactId?: Id<"artifacts">;
       subjectArtifactId?: Id<"artifacts">;
       resultData?: unknown;
+      nextWork: NextWork;
     }) => execute("complete", () => completeMutation(input)),
     [completeMutation, execute],
   );

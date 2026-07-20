@@ -3,7 +3,7 @@
 import type {Doc} from "@convex/_generated/dataModel";
 import {ArtifactReview} from "@/components/ArtifactReview";
 import type {ProjectDetail} from "@/data/useProjectDetail";
-import {ArtifactContent} from "./ArtifactContent";
+import {ArtifactContent} from "../activities/ArtifactContent";
 import {ArtifactReviewTask} from "./ArtifactReviewTask";
 import {ArtifactSubmissionTask} from "./ArtifactSubmissionTask";
 

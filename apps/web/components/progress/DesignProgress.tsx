@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ProjectDetail } from "@/data/useProjectDetail";
+import { ZoomOverlay } from "@/components/ZoomOverlay";
 
 interface ScreenInfo {
   name: string;
@@ -58,9 +59,12 @@ export function DesignProgress({ detail }: { detail: ProjectDetail }) {
         </div>
       </section>
 
-      {/* Zoom overlay */}
-      {zoomedScreen && (
-        <ZoomOverlay screen={zoomedScreen} onClose={() => setZoomedScreen(null)} />
+      {zoomedScreen?.imageUrl && (
+        <ZoomOverlay
+          imageUrl={zoomedScreen.imageUrl}
+          onClose={() => setZoomedScreen(null)}
+          title={zoomedScreen.name}
+        />
       )}
     </>
   );
@@ -143,48 +147,3 @@ function SkeletonLoader() {
   );
 }
 
-function ZoomOverlay({
-  screen,
-  onClose,
-}: {
-  screen: ScreenInfo;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-8 backdrop-blur-sm"
-      onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-      role="dialog"
-    >
-      <div
-        className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-[#e1e3e6] p-4">
-          <h3 className="text-sm font-semibold text-[#2c3038]">{screen.name}</h3>
-          <button
-            className="flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-[#edeeef]"
-            onClick={onClose}
-            type="button"
-          >
-            <span className="text-xl leading-none text-[#727785]">&times;</span>
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto bg-[#f8f9fa] p-8">
-          {screen.imageUrl ? (
-            <img
-              alt={`${screen.name} full preview`}
-              className="mx-auto max-w-full border border-[#e1e3e6] shadow-lg"
-              src={screen.imageUrl}
-            />
-          ) : (
-            <p className="text-center text-sm text-[#727785]">Preview not yet available</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -20,7 +20,7 @@ export async function insertWork(
   work: WorkDraft,
   status: "queued",
 ) {
-  validateInstructionContract(work.instruction, "ready");
+  validateInstructionContract(work.instruction);
   const inputs = Object.values(work.instruction.inputs) as Array<{
     artifactId: Id<"artifacts">;
     artifactType: ArtifactType;
@@ -53,13 +53,10 @@ export async function insertWork(
   });
 }
 
-export function validateInstructionContract(
-  instruction: {
-    type: string;
-    inputs: Record<string, { source: string; artifactType: ArtifactType }>;
-  },
-  state: "ready" | "continuation",
-) {
+export function validateInstructionContract(instruction: {
+  type: string;
+  inputs: Record<string, { source: string; artifactType: ArtifactType }>;
+}) {
   const definition = WORK_DEFINITIONS[instruction.type as WorkOperation];
   if (!definition) throw new Error(`Unknown work operation: ${instruction.type}`);
 
@@ -73,21 +70,13 @@ export function validateInstructionContract(
     throw new Error(`Invalid inputs for work operation: ${instruction.type}`);
   }
 
-  let pendingResults = 0;
   for (const [name, input] of Object.entries(instruction.inputs)) {
     if (input.artifactType !== expectedInputs[name]) {
       throw new Error(`Invalid ${name} input for work operation: ${instruction.type}`);
     }
-    if (input.source === "userTaskResult") pendingResults += 1;
-  }
-
-  const expectedPendingResults = state === "continuation" ? 1 : 0;
-  if (pendingResults !== expectedPendingResults) {
-    throw new Error(
-      state === "continuation"
-        ? "A continuation must expect exactly one user task result"
-        : "Queued work cannot contain a pending user task result",
-    );
+    if (input.source !== "artifact") {
+      throw new Error("Queued work cannot contain a pending user task result");
+    }
   }
 }
 

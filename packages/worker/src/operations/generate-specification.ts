@@ -71,29 +71,6 @@ export const generateSpecification: WorkHandler<"generateSpecification"> = {
           subjectArtifactId: followUpQuestionnaire.id,
           previousResultArtifactId: response.id,
           result: { type: "submitArtifact", artifactType: "questionnaireResponse" },
-          onComplete: {
-            type: "startWork",
-            work: {
-              phase: ctx.work.phase,
-              label: ctx.work.label,
-              instruction: {
-                type: ctx.work.instruction.type,
-                inputs: {
-                  brief: { source: "artifact", artifactType: "brief", artifactId: brief.id },
-                  questionnaire: {
-                    source: "artifact",
-                    artifactType: "questionnaire",
-                    artifactId: followUpQuestionnaire.id,
-                  },
-                  questionnaireResponse: {
-                    source: "userTaskResult",
-                    artifactType: "questionnaireResponse",
-                  },
-                },
-                revision: ctx.work.instruction.revision,
-              },
-            },
-          },
         },
       };
     }
@@ -112,22 +89,6 @@ export const generateSpecification: WorkHandler<"generateSpecification"> = {
         label: "Review your site plan",
         subjectArtifactId: artifact.id,
         result: { type: "selectVersion" },
-        onComplete: {
-          type: "startWork",
-          work: {
-            phase: "visualDesign",
-            label: "Designing your site",
-            instruction: {
-              type: "generateDesign",
-              inputs: {
-                specification: {
-                  source: "userTaskResult",
-                  artifactType: "specification",
-                },
-              },
-            },
-          },
-        },
       },
     };
   },

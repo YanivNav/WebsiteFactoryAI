@@ -1,8 +1,8 @@
 import type { Doc } from "@convex/_generated/dataModel";
 import type { ProjectDetail } from "@/data/useProjectDetail";
-import { WorkProgress } from "./WorkProgress";
+import { WorkProgress } from "../progress/WorkProgress";
 import { DraftActivity } from "./DraftActivity";
-import { UserTaskView } from "./UserTaskView";
+import { UserTaskView } from "../tasks/UserTaskView";
 
 export function ActivityView({
   detail,

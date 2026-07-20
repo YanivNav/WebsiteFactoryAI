@@ -40,4 +40,18 @@ export const WORK_DEFINITIONS = {
 } as const satisfies Record<string, { inputs: Record<string, ArtifactType> }>;
 
 export type WorkOperation = keyof typeof WORK_DEFINITIONS;
+export type NextWork = WorkOperation | "completeProject";
+
+export const OPERATION_PHASE: Record<WorkOperation, Phase> = {
+  generateQuestions: "sitePlan",
+  generateSpecification: "sitePlan",
+  generateDesign: "visualDesign",
+};
+
+export const OPERATION_LABEL: Record<WorkOperation, string> = {
+  generateQuestions: "Reading your brief",
+  generateSpecification: "Planning your site",
+  generateDesign: "Designing your site",
+};
+
 import type { ArtifactType } from "./artifacts";

@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Workflow,
 } from "lucide-react";
-import { ActivityActions } from "./ActivityActions";
+import { ActivityActions } from "../activities/ActivityActions";
 
 // Option pills — mirrors the "Quick Questions" design: a light-blue filled,
 // primary-bordered chip when picked; a subtle outlined chip otherwise.

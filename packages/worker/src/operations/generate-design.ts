@@ -117,7 +117,6 @@ export const generateDesign: WorkHandler<"generateDesign"> = {
         label: "Review your site design",
         subjectArtifactId: design.id,
         result: { type: "selectVersion" },
-        onComplete: { type: "completeProject" },
       },
     };
   },
