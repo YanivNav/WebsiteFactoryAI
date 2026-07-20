@@ -1,5 +1,11 @@
 import type { Artifact, ArtifactData, ArtifactType, WorkOperation } from "@factory/shared";
-import type { ArtifactInput, LeasedWork, ServerAccess } from "../server";
+import type {
+  ArtifactAsset,
+  ArtifactInput,
+  LeasedWork,
+  ScreenRevisionRequest,
+  ServerAccess,
+} from "../server";
 
 type InputArtifactType<
   K extends WorkOperation,
@@ -28,7 +34,7 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
     });
   }
 
-  async progress(percent: number, message: string): Promise<void> {
+  async progress(percent: number, message: string, data?: unknown): Promise<void> {
     this.log("info", message);
     await this.server.appendProgress({
       projectId: this.work.projectId,
@@ -37,7 +43,23 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
       attempt: this.work.attempt,
       percent,
       message,
+      data,
     });
+  }
+
+  /** Upload a blob (e.g. a screenshot or HTML file) to file storage. */
+  uploadBlob(bytes: Uint8Array, contentType: string): Promise<string> {
+    return this.server.uploadBlob(this.work.id, this.workerId, bytes, contentType);
+  }
+
+  /** Resolve a storage id to a download URL. */
+  getFileUrl(storageId: string): Promise<string | null> {
+    return this.server.getFileUrl(storageId);
+  }
+
+  /** Per-screen revision requests raised by the user while this work is running. */
+  claimScreenRevisions(): Promise<ScreenRevisionRequest[]> {
+    return this.server.claimScreenRevisions(this.work.id, this.workerId);
   }
 
   async getInput<N extends keyof LeasedWork<K>["instruction"]["inputs"] & string>(
@@ -69,6 +91,7 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
     type: T,
     data: ArtifactData<T>,
     basedOnArtifactId?: string,
+    assets?: ArtifactAsset[],
   ): Promise<Artifact<T>> {
     return this.server.addArtifact({
       projectId: this.work.projectId,
@@ -78,6 +101,7 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
       type,
       data,
       basedOnArtifactId,
+      assets,
     });
   }
 }

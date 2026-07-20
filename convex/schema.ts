@@ -10,6 +10,9 @@ export const revisionValidator = v.object({
   mode: v.union(v.literal("initial"), v.literal("regenerate"), v.literal("revise")),
   baseArtifactId: v.optional(v.id("artifacts")),
   feedback: v.optional(v.string()),
+  // When set, the revision targets a single design screen (by page path) rather
+  // than the whole artifact.
+  screenPath: v.optional(v.string()),
 });
 
 export const userTaskResultValidator = v.union(
@@ -170,6 +173,16 @@ export default defineSchema({
   })
     .index("by_work", ["workId"])
     .index("by_work_and_attempt", ["workId", "attempt"]),
+
+  // Per-screen revision requests raised while a design work is still running. The
+  // running handler drains pending rows after each screen and regenerates them.
+  screenRevisions: defineTable({
+    projectId: v.id("projects"),
+    workId: v.id("works"),
+    screenPath: v.string(),
+    feedback: v.string(),
+    status: v.union(v.literal("pending"), v.literal("claimed")),
+  }).index("by_work_and_status", ["workId", "status"]),
 
   logs: defineTable({
     projectId: v.id("projects"),

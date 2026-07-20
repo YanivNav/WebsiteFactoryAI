@@ -113,6 +113,7 @@ export const appendProgress = mutation({
     attempt: v.number(),
     percent: v.number(),
     message: v.string(),
+    data: v.optional(v.any()),
   },
   handler: async (ctx, { workerId, ...input }) => {
     const work = await ctx.db.get(input.workId);
@@ -128,6 +129,38 @@ export const appendProgress = mutation({
       ...input,
       percent: Math.min(100, Math.max(0, input.percent)),
     });
+  },
+});
+
+export const generateUploadUrl = mutation({
+  args: { workId: v.id("works"), workerId: v.string() },
+  handler: async (ctx, { workId, workerId }) => {
+    const work = await ctx.db.get(workId);
+    if (!work || work.status !== "running" || work.leaseWorkerId !== workerId) {
+      throw new Error("Work no longer owns this upload");
+    }
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
+export const getFileUrl = query({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => {
+    return ctx.storage.getUrl(storageId);
+  },
+});
+
+export const claimScreenRevisions = mutation({
+  args: { workId: v.id("works"), workerId: v.string() },
+  handler: async (ctx, { workId, workerId }) => {
+    const work = await ctx.db.get(workId);
+    if (!work || work.status !== "running" || work.leaseWorkerId !== workerId) return [];
+    const pending = await ctx.db
+      .query("screenRevisions")
+      .withIndex("by_work_and_status", (q) => q.eq("workId", workId).eq("status", "pending"))
+      .collect();
+    await Promise.all(pending.map((row) => ctx.db.patch(row._id, { status: "claimed" })));
+    return pending.map((row) => ({ screenPath: row.screenPath, feedback: row.feedback }));
   },
 });
 
@@ -149,6 +182,9 @@ export const addArtifact = mutation({
     type: artifactTypeValidator,
     data: v.any(),
     basedOnArtifactId: v.optional(v.id("artifacts")),
+    assets: v.optional(
+      v.array(v.object({ id: v.string(), data: v.any(), storageId: v.id("_storage") })),
+    ),
   },
   handler: async (ctx, input) => {
     const work = await ctx.db.get(input.workId);
@@ -180,6 +216,7 @@ export const addArtifact = mutation({
       basedOnArtifactId: input.basedOnArtifactId,
       createdByWorkId: input.workId,
       outputKey: input.outputKey,
+      assets: input.assets,
     });
     const artifact = await ctx.db.get(artifactId);
     if (!artifact) throw new Error("Artifact could not be saved");

@@ -1,7 +1,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { Artifact, ArtifactType } from "@factory/shared";
-import type { LeasedWork, ServerAccess, WorkCompletion, WorkId } from ".";
+import type { LeasedWork, ScreenRevisionRequest, ServerAccess, WorkCompletion, WorkId } from ".";
 
 const mutation = (name: string) => makeFunctionReference<"mutation">(name);
 const query = (name: string) => makeFunctionReference<"query">(name);
@@ -15,6 +15,9 @@ const functions = {
   appendProgress: mutation("worker:appendProgress"),
   getArtifact: query("worker:getArtifact"),
   addArtifact: mutation("worker:addArtifact"),
+  generateUploadUrl: mutation("worker:generateUploadUrl"),
+  claimScreenRevisions: mutation("worker:claimScreenRevisions"),
+  getFileUrl: query("worker:getFileUrl"),
 } as const;
 
 export class ConvexServer implements ServerAccess {
@@ -79,5 +82,39 @@ export class ConvexServer implements ServerAccess {
     input: Parameters<ServerAccess["addArtifact"]>[0],
   ): Promise<Artifact<T>> {
     return this.client.mutation(functions.addArtifact, input) as Promise<Artifact<T>>;
+  }
+
+  async uploadBlob(
+    workId: WorkId,
+    workerId: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<string> {
+    const uploadUrl = (await this.client.mutation(functions.generateUploadUrl, {
+      workId,
+      workerId,
+    })) as string;
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": contentType },
+      body: bytes,
+    });
+    if (!response.ok) throw new Error(`Blob upload failed: ${response.status}`);
+    const { storageId } = (await response.json()) as { storageId: string };
+    return storageId;
+  }
+
+  async getFileUrl(storageId: string): Promise<string | null> {
+    return this.client.query(functions.getFileUrl, { storageId });
+  }
+
+  async claimScreenRevisions(
+    workId: WorkId,
+    workerId: string,
+  ): Promise<ScreenRevisionRequest[]> {
+    return (await this.client.mutation(functions.claimScreenRevisions, {
+      workId,
+      workerId,
+    })) as ScreenRevisionRequest[];
   }
 }

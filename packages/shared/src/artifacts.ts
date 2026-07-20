@@ -19,7 +19,7 @@ const artifactTypeMap = {
   questionnaire: {} as Questionnaire,
   questionnaireResponse: {} as QuestionnaireResponse,
   specification: {} as Specification,
-  design: {},
+  design: {} as Design,
   manualTasks: {},
   qaPlan: {},
   qaResult: {},
@@ -360,3 +360,19 @@ export const SpecificationSchema = z.object({
 });
 
 export type Specification = z.infer<typeof SpecificationSchema>;
+
+// A generated design: one screen per site page. The HTML and screenshot for each
+// screen live in Convex file storage as artifact assets; the document only holds
+// references to them by asset id.
+export const DesignScreenSchema = z.object({
+  name: z.string().describe("The screen's page name"),
+  path: z.string().describe("The URL path of the page this screen designs"),
+  deviceType: z.enum(["desktop", "mobile"]),
+  htmlAssetId: z.string().describe("Asset id of the screen's HTML blob"),
+  imageAssetId: z.string().describe("Asset id of the screen's screenshot blob"),
+});
+export const DesignSchema = z.object({
+  screens: z.array(DesignScreenSchema),
+});
+export type DesignScreen = z.infer<typeof DesignScreenSchema>;
+export type Design = z.infer<typeof DesignSchema>;

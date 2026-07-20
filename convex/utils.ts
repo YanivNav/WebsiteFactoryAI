@@ -101,6 +101,7 @@ export async function insertArtifact(
     createdByWorkId?: Id<"works">;
     createdByUserTaskId?: Id<"userTasks">;
     outputKey?: string;
+    assets?: { id: string; data: unknown; storageId: Id<"_storage"> }[];
   },
 ) {
   if (input.basedOnArtifactId) {
@@ -117,10 +118,11 @@ export async function insertArtifact(
     )
     .collect();
 
+  const { assets, ...rest } = input;
   return ctx.db.insert("artifacts", {
-    ...input,
+    ...rest,
     version: artifacts.length + 1,
-    assets: [],
+    assets: assets ?? [],
   });
 }
 

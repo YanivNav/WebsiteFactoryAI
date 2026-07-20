@@ -1,4 +1,5 @@
 import type { WorkOperation } from "@factory/shared";
+import { generateDesign } from "./generate-design";
 import { generateQuestions } from "./generate-questions";
 import { generateSpecification } from "./generate-specification";
 import type { WorkHandler } from "./types";
@@ -8,6 +9,7 @@ type HandlerRegistry = Partial<{
 }>;
 
 const handlers = {
+  generateDesign,
   generateQuestions,
   generateSpecification,
 } satisfies HandlerRegistry;

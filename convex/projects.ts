@@ -150,8 +150,10 @@ export const reviseCurrentTask = mutation({
     userTaskId: v.id("userTasks"),
     sourceArtifactId: v.id("artifacts"),
     feedback: v.optional(v.string()),
+    // For design reviews: regenerate only this screen (by page path) instead of all.
+    screenPath: v.optional(v.string()),
   },
-  handler: async (ctx, { userTaskId, sourceArtifactId, feedback }) => {
+  handler: async (ctx, { userTaskId, sourceArtifactId, feedback, screenPath }) => {
     const task = await ctx.db.get(userTaskId);
     if (!task || task.status !== "open") throw new Error("This task is no longer open");
     const project = await requireProject(ctx, task.projectId);
@@ -182,12 +184,41 @@ export const reviseCurrentTask = mutation({
             mode: note ? "revise" : "regenerate",
             baseArtifactId: source._id,
             feedback: note || undefined,
+            screenPath: screenPath || undefined,
           },
         },
       },
       "queued",
     );
     await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Queue a revision for a single screen while its design work is still generating.
+ * The running handler drains pending rows after each screen and regenerates the
+ * requested one right after the screen it is currently working on.
+ */
+export const requestScreenRevision = mutation({
+  args: {
+    workId: v.id("works"),
+    screenPath: v.string(),
+    feedback: v.string(),
+  },
+  handler: async (ctx, { workId, screenPath, feedback }) => {
+    const note = feedback.trim();
+    if (!note) return;
+    const work = await ctx.db.get(workId);
+    if (!work || work.status !== "running") {
+      throw new Error("This design is no longer generating");
+    }
+    await ctx.db.insert("screenRevisions", {
+      projectId: work.projectId,
+      workId,
+      screenPath,
+      feedback: note,
+      status: "pending",
+    });
   },
 });
 
@@ -281,6 +312,11 @@ export const restartFromBrief = mutation({
         .withIndex("by_work", (q) => q.eq("workId", work._id))
         .collect();
       for (const item of progress) await ctx.db.delete(item._id);
+      const revisions = await ctx.db
+        .query("screenRevisions")
+        .withIndex("by_work_and_status", (q) => q.eq("workId", work._id))
+        .collect();
+      for (const item of revisions) await ctx.db.delete(item._id);
     }
     for (const item of logs) await ctx.db.delete(item._id);
     for (const item of tasks) await ctx.db.delete(item._id);
@@ -351,14 +387,24 @@ export const detail = query({
       activity.type === "userTask"
         ? userTasks.find((task) => task._id === activity.userTaskId)
         : undefined;
-    const progress = currentWork
+    const progressEntries = currentWork
       ? await ctx.db
           .query("workProgress")
           .withIndex("by_work_and_attempt", (q) =>
             q.eq("workId", currentWork._id).eq("attempt", currentWork.attempt),
           )
           .order("desc")
-          .first()
+          .collect()
+      : [];
+    // For design work, accumulate completed screens across all progress entries so
+    // the UI can show the growing grid in real time. The latest entry is still used
+    // for percent / message.
+    const completedScreens = currentWork?.instruction.type === "generateDesign"
+      ? await accumulateDesignScreens(ctx, progressEntries)
+      : undefined;
+    const latestProgress = progressEntries[0] ?? null;
+    const progress = latestProgress
+      ? { ...latestProgress, data: { ...(latestProgress.data as Record<string, unknown> ?? {}), completedScreens } }
       : null;
     const resolvedArtifacts: Artifact[] = await Promise.all(
       artifacts.map((artifact) => resolveArtifact(ctx, artifact)),
@@ -381,6 +427,28 @@ async function requireProject(ctx: MutationCtx, projectId: Id<"projects">) {
   const project = await ctx.db.get(projectId);
   if (!project) throw new Error("Project not found");
   return project;
+}
+
+/**
+ * Walk all progress entries for a design work and accumulate completed screens.
+ * Each entry's data may carry a `completedScreen` record with `name`, `path`,
+ * `imageUrl`, and `htmlUrl`. Later entries for the same path overwrite earlier
+ * ones, so the returned list reflects the latest state of every screen.
+ */
+async function accumulateDesignScreens(
+  _ctx: QueryCtx,
+  progressEntries: Doc<"workProgress">[],
+) {
+  const byPath = new Map<string, { name: string; path: string; imageUrl: string | null; htmlUrl: string | null }>();
+  // Walk from oldest to newest so later entries win.
+  for (const entry of progressEntries.toReversed()) {
+    const data = entry.data as Record<string, unknown> | undefined;
+    const screen = data?.completedScreen as
+      | { name: string; path: string; imageUrl: string | null; htmlUrl: string | null }
+      | undefined;
+    if (screen?.path) byPath.set(screen.path, screen);
+  }
+  return [...byPath.values()];
 }
 
 async function requireTaskArtifact(

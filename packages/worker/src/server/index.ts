@@ -14,6 +14,19 @@ export type WorkRevision = {
   mode: "initial" | "regenerate" | "revise";
   baseArtifactId?: string;
   feedback?: string;
+  /** When set, the revision targets a single design screen (by page path). */
+  screenPath?: string;
+};
+
+export type ArtifactAsset = {
+  id: string;
+  data: unknown;
+  storageId: string;
+};
+
+export type ScreenRevisionRequest = {
+  screenPath: string;
+  feedback: string;
 };
 
 export type ArtifactInput<T extends ArtifactType> = {
@@ -135,6 +148,7 @@ export interface ServerAccess {
     attempt: number;
     percent: number;
     message: string;
+    data?: unknown;
   }): Promise<void>;
   getArtifact<T extends ArtifactType>(
     projectId: ProjectId,
@@ -148,5 +162,17 @@ export interface ServerAccess {
     type: T;
     data: ArtifactData<T>;
     basedOnArtifactId?: string;
+    assets?: ArtifactAsset[];
   }): Promise<Artifact<T>>;
+  /** Upload a blob to file storage and return its storage id. */
+  uploadBlob(
+    workId: WorkId,
+    workerId: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<string>;
+  /** Claim pending per-screen revision requests raised while this work runs. */
+  claimScreenRevisions(workId: WorkId, workerId: string): Promise<ScreenRevisionRequest[]>;
+  /** Resolve a storage id to a download URL. */
+  getFileUrl(storageId: string): Promise<string | null>;
 }

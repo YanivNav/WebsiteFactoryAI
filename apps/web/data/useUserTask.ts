@@ -37,6 +37,7 @@ export function useUserTask() {
       userTaskId: Id<"userTasks">;
       sourceArtifactId: Id<"artifacts">;
       feedback?: string;
+      screenPath?: string;
     }) => execute("revise", () => reviseMutation(input)),
     [execute, reviseMutation],
   );
