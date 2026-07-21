@@ -34,7 +34,6 @@ export function ArtifactSubmissionTask({ detail, task, viewedArtifactId, onViewA
               userTaskId: task._id,
               subjectArtifactId: artifact.id as Id<"artifacts">,
               resultData,
-              nextWork: "generateSpecification",
             })
           }
           previousResult={previousResult}

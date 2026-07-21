@@ -253,6 +253,45 @@ export const completeWork = mutation({
       error: undefined,
     });
 
+    // Screen revisions that arrived after the worker's final drain would
+    // otherwise be dropped. Roll the first one into a follow-up revision work
+    // based on the artifact just produced (instead of opening the review task)
+    // and re-parent the rest onto it, so its own drain picks them up.
+    if (work.instruction.type === "generateDesign") {
+      const pending = await ctx.db
+        .query("screenRevisions")
+        .withIndex("by_work_and_status", (q) => q.eq("workId", workId).eq("status", "pending"))
+        .collect();
+      const baseArtifact = outputArtifacts.find((artifact) => artifact.type === "design");
+      if (pending.length > 0 && baseArtifact) {
+        const [first, ...rest] = pending;
+        const followUpId = await insertWork(
+          ctx,
+          project._id,
+          {
+            phase: work.phase,
+            label: work.label,
+            instruction: {
+              ...work.instruction,
+              revision: {
+                mode: "revise",
+                baseArtifactId: baseArtifact._id,
+                feedback: first!.feedback,
+                screenPath: first!.screenPath,
+              },
+            },
+          },
+          "queued",
+        );
+        await ctx.db.delete(first!._id);
+        for (const row of rest) await ctx.db.patch(row._id, { workId: followUpId });
+        await ctx.db.patch(project._id, {
+          currentActivity: { type: "work", workId: followUpId },
+        });
+        return;
+      }
+    }
+
     if (completion.type === "completeProject") {
       await ctx.db.patch(project._id, { currentActivity: { type: "completed" } });
       return;

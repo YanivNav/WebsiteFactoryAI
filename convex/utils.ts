@@ -14,6 +14,29 @@ export type WorkDraft = {
   instruction: Doc<"works">["instruction"];
 };
 
+/**
+ * Build the draft for queueing an operation from its WORK_DEFINITIONS entry:
+ * phase and label come from the definition, and each declared input is
+ * resolved to an artifact id via `resolveInput`.
+ */
+export function buildWorkDraft(
+  operation: WorkOperation,
+  resolveInput: (type: ArtifactType) => Id<"artifacts"> | undefined,
+): WorkDraft {
+  const definition = WORK_DEFINITIONS[operation];
+  const inputs: Doc<"works">["instruction"]["inputs"] = {};
+  for (const [name, type] of Object.entries(definition.inputs) as [string, ArtifactType][]) {
+    const artifactId = resolveInput(type);
+    if (!artifactId) throw new Error(`Missing input ${name} (${type}) for ${operation}`);
+    inputs[name] = { source: "artifact", artifactType: type, artifactId };
+  }
+  return {
+    phase: definition.phase,
+    label: definition.label,
+    instruction: { type: operation, inputs },
+  };
+}
+
 export async function insertWork(
   ctx: MutationCtx,
   projectId: Id<"projects">,
@@ -146,6 +169,7 @@ async function resolveAssets(
   return assets.map((asset) => ({
     id: asset.id,
     data: asset.data,
+    storageId: asset.storageId,
     url: urls.get(asset.storageId) ?? null,
   }));
 }

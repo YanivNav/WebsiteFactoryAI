@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CheckCircle2, PencilLine } from "lucide-react";
-import type { ArtifactType, NextWork } from "@factory/shared";
+import { PHASE_REVIEW_ARTIFACT, type ArtifactType } from "@factory/shared";
 import type { Id } from "@convex/_generated/dataModel";
 import { ArtifactReview } from "@/components/ArtifactReview";
 import { useUserTask } from "@/data/useUserTask";
@@ -10,27 +10,23 @@ import type { UserTaskViewProps } from "./UserTaskView";
 import { ActivityActions } from "../activities/ActivityActions";
 import { ArtifactContent } from "../activities/ArtifactContent";
 
-const NEXT_WORK_FOR_ARTIFACT: Partial<Record<ArtifactType, NextWork>> = {
-  specification: "generateDesign",
-  design: "completeProject",
-};
-
 export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtifact }: UserTaskViewProps) {
   const subject = findArtifact(detail, task.subjectArtifactId);
-  const { complete, revise, busy } = useUserTask();
+  const { complete, revise, deleteVersion, busy } = useUserTask();
   const [revising, setRevising] = useState(false);
   const [feedback, setFeedback] = useState("");
 
-  if (!subject) return <MissingArtifact />;
-  const versions = detail.artifacts[subject.type] ?? [];
-  const nextWork = NEXT_WORK_FOR_ARTIFACT[subject.type];
-  if (!nextWork) return <div className="p-4 text-sm text-red-700">Unknown next step for: {subject.type}</div>;
+  // The subject may have been deleted — fall back to the type this phase reviews.
+  const artifactType: ArtifactType | undefined = subject?.type ?? PHASE_REVIEW_ARTIFACT[task.phase];
+  if (!artifactType) return <MissingArtifact />;
+  const versions = detail.artifacts[artifactType] ?? [];
+  if (versions.length === 0) return <MissingArtifact />;
 
   return (
     <ArtifactReview
-      approvedArtifactId={detail.approvedArtifactIds[subject.type]}
+      approvedArtifactId={detail.approvedArtifactIds[artifactType]}
       onView={onViewArtifact}
-      proposedArtifactId={subject.id}
+      proposedArtifactId={subject?.id ?? versions[0].id}
       viewedArtifactId={viewedArtifactId}
       renderActions={(artifact) => (
         <>
@@ -49,7 +45,7 @@ export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtif
           )}
           <ActivityActions
             primary={{
-              label: `Continue with Version ${artifact.version}`,
+              label: versions.length > 1 ? `Continue with Version ${artifact.version}` : 'Continue',
               icon: <CheckCircle2 size={16} />,
               loading: busy === "complete",
               disabled: busy !== null,
@@ -57,7 +53,6 @@ export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtif
                 void complete({
                   userTaskId: task._id,
                   artifactId: artifact.id as Id<"artifacts">,
-                  nextWork,
                 }),
             }}
             secondary={
@@ -80,10 +75,23 @@ export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtif
                     onClick: () => setRevising(true),
                   }
             }
+            remove={
+              versions.length > 1
+                ? {
+                    label: "Delete Version",
+                    loading: busy === "delete",
+                    disabled: busy !== null,
+                    onClick: () =>
+                      void deleteVersion({
+                        artifactId: artifact.id as Id<"artifacts">,
+                      }),
+                  }
+                : undefined
+            }
           />
         </>
       )}
-      renderArtifact={(artifact) => <ArtifactContent artifact={artifact} versions={versions} />}
+      renderArtifact={(artifact) => <ArtifactContent artifact={artifact} versions={versions} taskId={task._id} />}
       versionLabel="Versions"
       versions={versions}
     />

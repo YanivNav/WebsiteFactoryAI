@@ -45,6 +45,7 @@ export interface Asset {
   id: string;
   data: any;
   url: string | null;
+  storageId: string;
 }
 
 export const QuestionDefinitionSchema = z.object({
@@ -368,11 +369,16 @@ export const DesignScreenSchema = z.object({
   name: z.string().describe("The screen's page name"),
   path: z.string().describe("The URL path of the page this screen designs"),
   deviceType: z.enum(["desktop", "mobile"]),
+  prompt: z
+    .string()
+    .optional()
+    .describe("The visual-design prompt that produced this screen, kept for revisions"),
   htmlAssetId: z.string().describe("Asset id of the screen's HTML blob"),
   imageAssetId: z.string().describe("Asset id of the screen's screenshot blob"),
 });
 export const DesignSchema = z.object({
   screens: z.array(DesignScreenSchema),
+  stitchProjectId: z.string().optional().describe("Google Stitch project ID, reused across revisions"),
 });
 export type DesignScreen = z.infer<typeof DesignScreenSchema>;
 export type Design = z.infer<typeof DesignSchema>;

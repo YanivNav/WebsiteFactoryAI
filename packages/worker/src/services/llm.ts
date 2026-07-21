@@ -19,7 +19,7 @@ export class LLMService {
       output: Output.object({ schema: z.object({ result: request.schema }) }),
       tools: request.tools ?? {},
     });
-    console.log("Running LLM agent to generate object");
+    console.log("Calling LLM to generate an object for " + request.instructions);
     const result = await agent.generate({ prompt: request.message });
     return result.output.result;
   }

@@ -4,14 +4,14 @@ import { useCallback, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import type { NextWork } from "@factory/shared";
 
-type TaskAction = "complete" | "revise" | "revisit";
+type TaskAction = "complete" | "revise" | "revisit" | "delete";
 
 export function useUserTask() {
   const completeMutation = useMutation(api.projects.completeUserTask);
   const reviseMutation = useMutation(api.projects.reviseCurrentTask);
   const revisitMutation = useMutation(api.projects.revisitUserTask);
+  const deleteMutation = useMutation(api.projects.deleteArtifact);
   const [busy, setBusy] = useState<TaskAction | null>(null);
 
   const execute = useCallback(async (action: TaskAction, callback: () => Promise<unknown>) => {
@@ -29,7 +29,6 @@ export function useUserTask() {
       artifactId?: Id<"artifacts">;
       subjectArtifactId?: Id<"artifacts">;
       resultData?: unknown;
-      nextWork: NextWork;
     }) => execute("complete", () => completeMutation(input)),
     [completeMutation, execute],
   );
@@ -50,5 +49,11 @@ export function useUserTask() {
     [execute, revisitMutation],
   );
 
-  return { complete, revise, revisit, busy };
+  const deleteVersion = useCallback(
+    (input: { artifactId: Id<"artifacts"> }) =>
+      execute("delete", () => deleteMutation(input)),
+    [deleteMutation, execute],
+  );
+
+  return { complete, revise, revisit, deleteVersion, busy };
 }

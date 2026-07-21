@@ -12,14 +12,27 @@ export interface ActivityAction {
 export function ActivityActions({
   primary,
   secondary,
+  remove,
   hint,
 }: {
   primary: ActivityAction;
   secondary?: ActivityAction;
+  remove?: ActivityAction;
   hint?: string;
 }) {
   return (
     <div className="border-outline mt-6 flex items-center justify-end gap-3 border-t pt-4">
+      {remove && (
+        <button
+          type="button"
+          onClick={remove.onClick}
+          disabled={remove.disabled}
+          className="me-auto text-white hover:bg-red-800 flex items-center gap-2 rounded border bg-red-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {remove.loading ? <LoaderCircle className="animate-spin" size={16} /> : remove.icon}
+          {remove.label}
+        </button>
+      )}
       {hint && <span className="text-ink-muted mr-auto text-xs">{hint}</span>}
       {secondary && (
         <button

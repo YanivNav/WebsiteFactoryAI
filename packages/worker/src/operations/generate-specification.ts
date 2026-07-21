@@ -1,7 +1,7 @@
 import { QuestionnaireSchema, SpecificationSchema } from "@factory/shared";
 import { z } from "zod";
 import { LLMService } from "../services/llm";
-import type { WorkHandler } from "./types";
+import { reviewCompletion, type WorkHandler } from "./types";
 
 let llm: LLMService;
 
@@ -82,14 +82,6 @@ export const generateSpecification: WorkHandler<"generateSpecification"> = {
       previousSpecification?.id,
     );
     await ctx.progress(90, "Finalizing your site plan");
-    return {
-      type: "createUserTask",
-      task: {
-        phase: ctx.work.phase,
-        label: "Review your site plan",
-        subjectArtifactId: artifact.id,
-        result: { type: "selectVersion" },
-      },
-    };
+    return reviewCompletion("generateSpecification", artifact.id);
   },
 };

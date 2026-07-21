@@ -1,18 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { ProjectDetail } from "@/data/useProjectDetail";
-import { ZoomOverlay } from "@/components/ZoomOverlay";
+import { useMutation } from "convex/react";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import type { ProjectDetail, ScreenInfo } from "@/data/useProjectDetail";
+import { ExternalLink } from "lucide-react";
+import { ScreenCard, ZoomOverlay } from "@/components/artifacts/DesignArtifact";
 
-interface ScreenInfo {
-  name: string;
-  path: string;
-  imageUrl: string | null;
-  htmlUrl: string | null;
-}
 
 export function DesignProgress({ detail }: { detail: ProjectDetail }) {
   const [zoomedScreen, setZoomedScreen] = useState<ScreenInfo | null>(null);
+  const requestScreenRevision = useMutation(api.projects.requestScreenRevision);
 
   // Expected screens come from the latest specification artifact.
   const spec = detail.artifacts.specification[0];
@@ -23,12 +22,13 @@ export function DesignProgress({ detail }: { detail: ProjectDetail }) {
       ]
     : [];
 
-  // Completed screens reported via progress data as the worker generates.
-  const completedScreens: ScreenInfo[] =
-    (detail.progress?.data as { completedScreens?: ScreenInfo[] } | undefined)
-      ?.completedScreens ?? [];
-
+  // Screens kept from the revision base appear here immediately; regenerated
+  // ones as the worker finishes them.
+  const completedScreens = detail.designProgress?.completedScreens ?? [];
+  const stitchProjectId = detail.designProgress?.stitchProjectId;
   const completedByPath = new Map(completedScreens.map((screen) => [screen.path, screen]));
+
+  const workId = detail.currentWork?._id;
 
   return (
     <>
@@ -38,11 +38,18 @@ export function DesignProgress({ detail }: { detail: ProjectDetail }) {
             Design Mockups
             {expectedScreens.length > 0 && (
               <span className="font-normal text-xs text-[#687182]">
-                ({completedScreens.length}/{expectedScreens.length} screens)
+                ({completedByPath.size}/{expectedScreens.length} screens)
               </span>
             )}
           </h3>
         </div>
+        {stitchProjectId && (
+          <div className="my-3 flex gap-1">Want to see the progress in real time?
+            <a className="underline text-primary hover:no-underline flex gap-1 items-center"
+               href={`https://stitch.withgoogle.com/projects/${stitchProjectId}`}
+               target="_blank">Open in Stitch <ExternalLink size={14} /></a>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {expectedScreens.map((screen) => {
@@ -53,6 +60,16 @@ export function DesignProgress({ detail }: { detail: ProjectDetail }) {
                 screen={screen}
                 completed={completed}
                 onZoom={setZoomedScreen}
+                onRequestChange={
+                  workId
+                    ? (screenPath, feedback) =>
+                        void requestScreenRevision({
+                          workId: workId as Id<"works">,
+                          screenPath,
+                          feedback,
+                        })
+                    : undefined
+                }
               />
             );
           })}
@@ -69,81 +86,3 @@ export function DesignProgress({ detail }: { detail: ProjectDetail }) {
     </>
   );
 }
-
-function ScreenCard({
-  screen,
-  completed,
-  onZoom,
-}: {
-  screen: { name: string; path: string };
-  completed?: ScreenInfo;
-  onZoom: (screen: ScreenInfo) => void;
-}) {
-  return (
-    <div className="group overflow-hidden rounded-lg border border-[#e1e3e6] bg-white transition-all duration-300 hover:border-[#adc6ff]">
-      <div className="relative aspect-[4/3] overflow-hidden border-b border-[#e1e3e6] bg-[#edeeef]">
-        {completed?.imageUrl ? (
-          <>
-            <img
-              alt={`${screen.name} design`}
-              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-              src={completed.imageUrl}
-            />
-            <div className="absolute inset-0 flex items-center justify-center bg-[#0058be]/20 opacity-0 transition-opacity group-hover:opacity-100">
-              <button
-                className="flex items-center gap-2 rounded bg-white px-4 py-2 text-xs font-semibold tracking-[0.05em] text-[#0058be] shadow-lg"
-                onClick={() => onZoom(completed)}
-                type="button"
-              >
-                <span className="text-base leading-none">&crarr;</span>
-                ENLARGE
-              </button>
-            </div>
-          </>
-        ) : (
-          <SkeletonLoader />
-        )}
-      </div>
-      <div className="flex items-center justify-between p-4">
-        <div>
-          <h4 className="text-sm font-semibold text-[#2c3038]">{screen.name}</h4>
-          <p className="text-[11px] text-[#727785]">
-            {completed ? "Generated just now" : "Generating..."}
-          </p>
-        </div>
-        {completed && (
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#def3e6] text-[10px] text-[#17693a]">
-            ✓
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SkeletonLoader() {
-  return (
-    <div className="flex h-full w-full animate-pulse flex-col gap-3 p-4">
-      {/* Header bar */}
-      <div className="flex items-center gap-3">
-        <div className="h-4 w-8 rounded bg-[#d9dadb]" />
-        <div className="h-4 flex-1 rounded bg-[#d9dadb]" />
-      </div>
-      {/* Hero block */}
-      <div className="h-1/3 w-full rounded bg-[#e1e3e4]" />
-      {/* Content lines */}
-      <div className="space-y-2">
-        <div className="h-3 w-3/4 rounded bg-[#d9dadb]" />
-        <div className="h-3 w-1/2 rounded bg-[#d9dadb]" />
-        <div className="h-3 w-2/3 rounded bg-[#d9dadb]" />
-      </div>
-      {/* Card grid */}
-      <div className="mt-auto grid grid-cols-3 gap-2">
-        <div className="h-12 rounded bg-[#e1e3e4]" />
-        <div className="h-12 rounded bg-[#e1e3e4]" />
-        <div className="h-12 rounded bg-[#e1e3e4]" />
-      </div>
-    </div>
-  );
-}
-

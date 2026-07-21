@@ -1,8 +1,14 @@
-import { type Artifact, type ArtifactType, OPERATION_LABEL, OPERATION_PHASE, WORK_DEFINITIONS, type NextWork } from "@factory/shared";
+import {
+  type Artifact,
+  FIRST_OPERATION,
+  OPERATION_FOR_OUTPUT,
+  PHASE_REVIEW_ARTIFACT,
+  WORK_DEFINITIONS,
+} from "@factory/shared";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, type MutationCtx, query, type QueryCtx } from "./_generated/server";
-import { insertArtifact, insertWork, resolveArtifact } from "./utils";
+import { buildWorkDraft, insertArtifact, insertWork, resolveArtifact } from "./utils";
 
 const SINGLE_USER = "owner";
 
@@ -43,20 +49,13 @@ export const start = mutation({
       await ctx.db.patch(projectId, { approvedArtifacts: { brief: briefId } });
     }
 
+    const draft = buildWorkDraft(FIRST_OPERATION, (type) =>
+      type === "brief" ? briefId : project.approvedArtifacts[type],
+    );
     const workId = await insertWork(
       ctx,
       projectId,
-      {
-        phase: "sitePlan",
-        label: "Reading your brief",
-        instruction: {
-          type: "generateQuestions",
-          inputs: {
-            brief: { source: "artifact", artifactType: "brief", artifactId: briefId },
-          },
-          revision: { mode: "initial" },
-        },
-      },
+      { ...draft, instruction: { ...draft.instruction, revision: { mode: "initial" } } },
       "queued",
     );
     await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
@@ -69,10 +68,6 @@ export const completeUserTask = mutation({
     artifactId: v.optional(v.id("artifacts")),
     subjectArtifactId: v.optional(v.id("artifacts")),
     resultData: v.optional(v.any()),
-    nextWork: v.union(
-      v.literal("completeProject"),
-      ...(Object.keys(WORK_DEFINITIONS) as Array<keyof typeof WORK_DEFINITIONS>).map((k) => v.literal(k)),
-    ),
   },
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.userTaskId);
@@ -127,7 +122,16 @@ export const completeUserTask = mutation({
       approvedArtifacts[resolved.type] = resultArtifactId;
     }
 
-    if (args.nextWork === "completeProject") {
+    // The workflow defines what comes next: the operation that produced the
+    // reviewed artifact names its successor.
+    const subjectId = chosenSubjectArtifactId ?? task.subjectArtifactId;
+    const subject = await ctx.db.get(subjectId);
+    if (!subject) throw new Error("Task subject is unavailable");
+    const producingOperation = OPERATION_FOR_OUTPUT[subject.type];
+    if (!producingOperation) throw new Error(`No workflow step produces ${subject.type}`);
+    const nextWork = WORK_DEFINITIONS[producingOperation].next;
+
+    if (nextWork === "completeProject") {
       await ctx.db.patch(project._id, {
         approvedArtifacts,
         currentActivity: { type: "completed" },
@@ -135,29 +139,10 @@ export const completeUserTask = mutation({
       return;
     }
 
-    const definition = WORK_DEFINITIONS[args.nextWork];
-    const inputs: Record<string, { source: "artifact"; artifactType: ArtifactType; artifactId: Id<"artifacts"> }> = {};
-    for (const [name, expectedType] of Object.entries(definition.inputs) as [string, ArtifactType][]) {
-      // If this input's type matches the task result, use the newly created/selected artifact.
-      const useResult =
-        resultArtifactId &&
-        (task.result.type === "submitArtifact"
-          ? expectedType === task.result.artifactType
-          : expectedType === (chosenSubjectArtifactId ? (await ctx.db.get(chosenSubjectArtifactId))?.type : undefined));
-
-      const artifactId: Id<"artifacts"> | undefined = useResult
-        ? resultArtifactId
-        : (approvedArtifacts[expectedType] as Id<"artifacts"> | undefined);
-
-      if (!artifactId) throw new Error(`Missing input ${name} (${expectedType}) for ${args.nextWork}`);
-      inputs[name] = { source: "artifact", artifactType: expectedType, artifactId };
-    }
-
-    const nextWorkId = await insertWork(ctx, project._id, {
-      phase: OPERATION_PHASE[args.nextWork],
-      label: OPERATION_LABEL[args.nextWork],
-      instruction: { type: args.nextWork, inputs },
-    }, "queued");
+    // The just-approved artifacts are already in approvedArtifacts, so inputs
+    // resolve to them where the types match.
+    const draft = buildWorkDraft(nextWork, (type) => approvedArtifacts[type]);
+    const nextWorkId = await insertWork(ctx, project._id, draft, "queued");
     await ctx.db.patch(project._id, {
       approvedArtifacts,
       currentActivity: { type: "work", workId: nextWorkId },
@@ -229,7 +214,7 @@ export const requestScreenRevision = mutation({
     const note = feedback.trim();
     if (!note) return;
     const work = await ctx.db.get(workId);
-    if (!work || work.status !== "running") {
+    if (!work || !["queued", "running"].includes(work.status)) {
       throw new Error("This design is no longer generating");
     }
     await ctx.db.insert("screenRevisions", {
@@ -358,6 +343,55 @@ export const restartFromBrief = mutation({
   },
 });
 
+export const deleteArtifact = mutation({
+  args: { artifactId: v.id("artifacts") },
+  handler: async (ctx, { artifactId }) => {
+    const artifact = await ctx.db.get(artifactId);
+    if (!artifact) throw new Error("Artifact not found");
+
+    const project = await requireProject(ctx, artifact.projectId);
+    if (project.approvedArtifacts[artifact.type] === artifactId) {
+      throw new Error("Cannot delete the approved version");
+    }
+
+    const versions = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) =>
+        q.eq("projectId", artifact.projectId).eq("type", artifact.type),
+      )
+      .collect();
+    if (versions.length <= 1) throw new Error("Cannot delete the only version");
+
+    // If deleting the version shown in the active task, switch the task to the
+    // latest remaining version so the UI doesn't break.
+    if (project.currentActivity.type === "userTask") {
+      const task = await ctx.db.get(project.currentActivity.userTaskId);
+      if (task?.status === "open") {
+        const remaining = versions
+          .filter((v) => v._id !== artifactId)
+          .toSorted((a, b) => b.version - a.version);
+        const replacement = remaining[0];
+        const patch: Partial<Doc<"userTasks">> = {};
+        if (task.subjectArtifactId === artifactId) patch.subjectArtifactId = replacement._id;
+        if (task.chosenSubjectArtifactId === artifactId) patch.chosenSubjectArtifactId = replacement._id;
+        if (Object.keys(patch).length > 0) await ctx.db.patch(task._id, patch);
+      }
+    }
+
+    // Revisions carry assets forward by reference, so a blob may be shared with
+    // other versions. Only delete storage no surviving version references.
+    const referencedElsewhere = new Set(
+      versions
+        .filter((version) => version._id !== artifactId)
+        .flatMap((version) => version.assets.map((asset) => asset.storageId)),
+    );
+    for (const asset of artifact.assets) {
+      if (!referencedElsewhere.has(asset.storageId)) await ctx.storage.delete(asset.storageId);
+    }
+    await ctx.db.delete(artifactId);
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
@@ -415,16 +449,18 @@ export const detail = query({
           .order("desc")
           .collect()
       : [];
-    // For design work, accumulate completed screens across all progress entries so
-    // the UI can show the growing grid in real time. The latest entry is still used
-    // for percent / message.
-    const completedScreens = currentWork?.instruction.type === "generateDesign"
-      ? await accumulateDesignScreens(ctx, progressEntries)
-      : undefined;
-    const latestProgress = progressEntries[0] ?? null;
-    const progress = latestProgress
-      ? { ...latestProgress, data: { ...(latestProgress.data as Record<string, unknown> ?? {}), completedScreens } }
+    // Live design progress: the accumulated screens plus the Stitch project
+    // link. Kept separate from `progress` so it exists even before the worker
+    // has written the first progress entry (e.g. a freshly queued revision).
+    const designProgress = currentWork?.instruction.type === "generateDesign"
+      ? {
+          completedScreens: await accumulateDesignScreens(ctx, currentWork, progressEntries),
+          stitchProjectId:
+            (progressEntries.find((entry) => entry.data?.stitchProjectId)?.data
+              ?.stitchProjectId as string | undefined) ?? null,
+        }
       : null;
+    const progress = progressEntries[0] ?? null;
     const resolvedArtifacts: Artifact[] = await Promise.all(
       artifacts.map((artifact) => resolveArtifact(ctx, artifact)),
     );
@@ -436,6 +472,7 @@ export const detail = query({
       works,
       userTasks,
       progress,
+      designProgress,
       logs,
       artifacts: resolvedArtifacts,
     };
@@ -449,16 +486,39 @@ async function requireProject(ctx: MutationCtx, projectId: Id<"projects">) {
 }
 
 /**
- * Walk all progress entries for a design work and accumulate completed screens.
- * Each entry's data may carry a `completedScreen` record with `name`, `path`,
- * `imageUrl`, and `htmlUrl`. Later entries for the same path overwrite earlier
- * ones, so the returned list reflects the latest state of every screen.
+ * Accumulate the completed screens of a design work. During a single-screen
+ * revision every other screen of the base design is kept as-is, so those are
+ * seeded from the base artifact right away — the UI shows them the moment the
+ * work exists, before the worker has reported anything. Progress entries may
+ * carry a `completedScreen` record with `name`, `path`, `imageUrl`, and
+ * `htmlUrl`; later entries for the same path overwrite earlier ones (and the
+ * baseline), so the returned list reflects the latest state of every screen.
  */
 async function accumulateDesignScreens(
-  _ctx: QueryCtx,
+  ctx: QueryCtx,
+  work: Doc<"works">,
   progressEntries: Doc<"workProgress">[],
 ) {
   const byPath = new Map<string, { name: string; path: string; imageUrl: string | null; htmlUrl: string | null }>();
+
+  const revision = work.instruction.revision;
+  if (revision?.screenPath && revision.baseArtifactId) {
+    const base = await ctx.db.get(revision.baseArtifactId);
+    if (base && base.type === "design") {
+      const resolved = (await resolveArtifact(ctx, base)) as Artifact<"design">;
+      const assetById = new Map(resolved.assets.map((asset) => [asset.id, asset]));
+      for (const screen of resolved.data.screens) {
+        if (screen.path === revision.screenPath) continue;
+        byPath.set(screen.path, {
+          name: screen.name,
+          path: screen.path,
+          imageUrl: assetById.get(screen.imageAssetId)?.url ?? null,
+          htmlUrl: assetById.get(screen.htmlAssetId)?.url ?? null,
+        });
+      }
+    }
+  }
+
   // Walk from oldest to newest so later entries win.
   for (const entry of progressEntries.toReversed()) {
     const data = entry.data as Record<string, unknown> | undefined;
@@ -478,7 +538,9 @@ async function requireTaskArtifact(
   const artifact = await ctx.db.get(artifactId);
   if (!artifact || artifact.projectId !== task.projectId) throw new Error("Version not found");
   const subject = await ctx.db.get(task.subjectArtifactId);
-  if (!subject || artifact.type !== subject.type) {
+  // The subject may have been deleted — fall back to the type this phase reviews.
+  const expectedType = subject?.type ?? PHASE_REVIEW_ARTIFACT[task.phase];
+  if (expectedType && artifact.type !== expectedType) {
     throw new Error("That version cannot be used for this task");
   }
   return artifact;

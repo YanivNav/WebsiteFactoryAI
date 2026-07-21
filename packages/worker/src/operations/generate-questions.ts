@@ -1,6 +1,6 @@
 import { QuestionnaireSchema } from "@factory/shared";
 import { LLMService } from "../services/llm";
-import type { WorkHandler } from "./types";
+import { reviewCompletion, type WorkHandler } from "./types";
 
 let llm: LLMService;
 
@@ -40,14 +40,6 @@ ${
         : "No questions needed",
     );
 
-    return {
-      type: "createUserTask",
-      task: {
-        phase: ctx.work.phase,
-        label: "A few quick questions",
-        subjectArtifactId: artifact.id,
-        result: { type: "submitArtifact", artifactType: "questionnaireResponse" },
-      },
-    };
+    return reviewCompletion("generateQuestions", artifact.id);
   },
 };

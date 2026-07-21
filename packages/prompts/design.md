@@ -41,4 +41,11 @@ Every screen prompt must include:
 - Keep each prompt focused and scoped to one screen. Do not reference other pages unless they
   are linked from this one.
 
+## Revisions
+
+The input may include `requestedChange` — user feedback on a previous version of this design
+(`previousScreenCount` tells you how many screens it had). When present, apply the requested
+change across every screen it affects while keeping everything else consistent with the
+specification.
+
 Follow the output schema exactly.

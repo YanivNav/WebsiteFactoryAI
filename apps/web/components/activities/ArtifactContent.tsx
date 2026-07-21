@@ -1,5 +1,6 @@
 import {type ComponentType} from "react";
 import type {Artifact, ArtifactType} from "@factory/shared";
+import type {Id} from "@convex/_generated/dataModel";
 import type {useUserTask} from "@/data/useUserTask";
 import {QuestionnaireEditor, QuestionnaireResponseView} from "../artifacts/QuestionnaireArtifact";
 import {SpecificationArtifactView} from "../artifacts/spec/SpecificationArtifact";
@@ -9,6 +10,7 @@ type ArtifactContentProps = {
   artifact: Artifact;
   versions: Artifact[];
   subject?: Artifact;
+  taskId?: string;
 };
 
 export type ArtifactEditorProps = {
@@ -58,7 +60,12 @@ const ARTIFACT_PRESENTATIONS: Partial<Record<ArtifactType, ArtifactPresentation>
     ),
   },
   design: {
-    View: ({ artifact }) => <DesignArtifact artifact={artifact as Artifact<"design">} />,
+    View: ({ artifact, taskId }) => (
+      <DesignArtifact
+        artifact={artifact as Artifact<"design">}
+        taskId={taskId as Id<"userTasks"> | undefined}
+      />
+    ),
   },
 };
 

@@ -1,5 +1,12 @@
+import type { ComponentType } from "react";
+import type { WorkOperation } from "@factory/shared";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import { DesignProgress } from "./DesignProgress";
+
+/** Operations with a richer live view rendered under the progress bar. */
+const OPERATION_PROGRESS_VIEWS: Partial<Record<WorkOperation, ComponentType<{ detail: ProjectDetail }>>> = {
+  generateDesign: DesignProgress,
+};
 
 export function WorkProgress({ detail }: { detail: ProjectDetail }) {
   const work = detail.currentWork;
@@ -7,7 +14,7 @@ export function WorkProgress({ detail }: { detail: ProjectDetail }) {
   const progress = Math.min(100, Math.max(0, detail.progress?.percent ?? 0));
   const message = detail.progress?.message ?? work.label;
 
-  const isDesign = work.instruction.type === "generateDesign";
+  const ProgressView = OPERATION_PROGRESS_VIEWS[work.instruction.type as WorkOperation];
 
   return (
     <div className="space-y-4">
@@ -35,7 +42,7 @@ export function WorkProgress({ detail }: { detail: ProjectDetail }) {
           />
         </div>
       </section>
-      {isDesign && <DesignProgress detail={detail} />}
+      {ProgressView && <ProgressView detail={detail} />}
     </div>
   );
 }

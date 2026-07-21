@@ -9,6 +9,14 @@ import type { Doc, Id } from "@convex/_generated/dataModel";
 export type ArtifactsMap = { [T in ArtifactType]: Artifact<T>[] };
 export type ActivityStatus = "draft" | "working" | "waiting" | "failed" | "completed";
 
+/** The live state of one screen while a design work is running. */
+export interface ScreenInfo {
+  name: string;
+  path: string;
+  imageUrl: string | null;
+  htmlUrl: string | null;
+}
+
 export interface ProjectDetail {
   project: Doc<"projects">;
   phase: Phase;
@@ -19,6 +27,8 @@ export interface ProjectDetail {
   works: Doc<"works">[];
   userTasks: Doc<"userTasks">[];
   progress?: Doc<"workProgress">;
+  /** Present while the current work is a design generation. */
+  designProgress?: { completedScreens: ScreenInfo[]; stitchProjectId: string | null };
   logs: Doc<"logs">[];
   artifacts: ArtifactsMap;
   approvedArtifactIds: Partial<Record<ArtifactType, string>>;
@@ -51,6 +61,7 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
       works: data.works,
       userTasks: data.userTasks,
       progress: data.progress ?? undefined,
+      designProgress: data.designProgress ?? undefined,
       logs: data.logs,
       artifacts,
       approvedArtifactIds: data.project.approvedArtifacts,

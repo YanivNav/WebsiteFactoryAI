@@ -1,4 +1,8 @@
-import { stitch, type Project } from "@google/stitch-sdk";
+import { buildFifeSuffix, stitch, type Project } from "@google/stitch-sdk";
+import type {WorkContext} from "../operations/context";
+
+/** Requested screenshot width from Stitch's image serving (FIFE). */
+const SCREENSHOT_WIDTH = 1600;
 
 export type StitchDeviceType = "DESKTOP" | "MOBILE" | "TABLET" | "AGNOSTIC";
 type StitchModelId = "GEMINI_3_PRO" | "GEMINI_3_FLASH" | "GEMINI_3_1_PRO";
@@ -23,6 +27,7 @@ function model(): StitchModelId {
 }
 
 async function downloadBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+  if (!url) throw new Error("Stitch returned an empty asset URL");
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Stitch asset download failed: ${response.status}`);
   const contentType = response.headers.get("content-type") ?? "application/octet-stream";
@@ -37,18 +42,36 @@ async function downloadBytes(url: string): Promise<{ bytes: Uint8Array; contentT
 export class StitchService {
   private project: Project | null = null;
 
-  async start(title: string): Promise<void> {
-    this.project = await stitch.createProject(title);
+  /** Create a fresh Stitch project. Returns its ID. */
+  async createProject(ctx: WorkContext): Promise<string> {
+    ctx.log("info", "Creating stitch project: " + ctx.work.projectTitle);
+    this.project = await stitch.createProject(ctx.work.projectTitle);
+    return this.project.projectId;
+  }
+
+  /** Load an existing Stitch project by ID — no API call. */
+  loadProject(id: string): void {
+    this.project = stitch.project(id);
+  }
+
+  getProjectId(): string | null {
+    return this.project?.projectId ?? null;
   }
 
   async generateScreen(
+    ctx: WorkContext,
     prompt: string,
     deviceType: StitchDeviceType = "DESKTOP",
   ): Promise<GeneratedScreen> {
-    if (!this.project) throw new Error("StitchService.start() must be called before generating");
-    const screen = await this.project.generate(prompt, deviceType, model());
+    if (!this.project) throw new Error("Create or load a Stitch project before generating");
+    ctx.log("info", "Generating with google stitch: " + JSON.stringify({ prompt, deviceType }));
+    const generated = await this.project.generate(prompt, deviceType, model());
+    // Refresh from get_screen so the screenshot reflects the latest state, not
+    // whatever was captured mid-generation in the generate_screen_from_text response.
+    const screen = await this.project.getScreen(generated.id);
     const [htmlUrl, imageUrl] = await Promise.all([screen.getHtml(), screen.getImage()]);
-    const [html, image] = await Promise.all([downloadBytes(htmlUrl), downloadBytes(imageUrl)]);
+    const hiresImageUrl = imageUrl + buildFifeSuffix({ width: SCREENSHOT_WIDTH });
+    const [html, image] = await Promise.all([downloadBytes(htmlUrl), downloadBytes(hiresImageUrl)]);
     return {
       html: html.bytes,
       htmlContentType: html.contentType.startsWith("text/")
