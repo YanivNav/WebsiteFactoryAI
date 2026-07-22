@@ -45,7 +45,7 @@ export class WixService {
     const result = await workspace.execInParent(
       "npx",
       ["--yes", "@wix/cli@latest", "login", "--api-key", apiKey],
-      { env: AGENT_ENV },
+      { env: AGENT_ENV, stripPackageManagerEnv: true },
     );
 
     const events = parseAgentEvents(result.stdout);
@@ -89,13 +89,13 @@ export class WixService {
         "--folder-name",
         workspace.name,
         "--business-name",
-        businessName,
+        'WF: ' + businessName,
         // Bare flag selects the blank starter — the code stage builds the real site.
         "--site-template",
         // Don't publish the empty starter; the real site goes live in a later stage.
         "--no-publish",
       ],
-      { timeoutMs: SCAFFOLD_TIMEOUT_MS, env: AGENT_ENV },
+      { timeoutMs: SCAFFOLD_TIMEOUT_MS, env: AGENT_ENV, stripPackageManagerEnv: true },
     );
     const events = parseAgentEvents(result.stdout);
     if (result.code !== 0) {

@@ -11,6 +11,15 @@ export interface ExecOptions {
   env?: Record<string, string>;
   /** Kill the command after this many milliseconds. Default 10 minutes. */
   timeoutMs?: number;
+  /**
+   * Remove the package-manager fingerprint the worker's own runner (pnpm)
+   * injects — `npm_config_user_agent`, `npm_execpath`, and the rest of the
+   * `npm_*` / `PNPM_*` vars. Without this a spawned `npm`/`npx` sees the
+   * inherited `pnpm/...` user agent and tools like the Wix scaffolder reject
+   * it ("Unsupported package manager"). Set it for any npm-based subprocess
+   * that must run as vanilla npm.
+   */
+  stripPackageManagerEnv?: boolean;
 }
 
 /**

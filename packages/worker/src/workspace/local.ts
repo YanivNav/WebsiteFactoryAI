@@ -81,10 +81,16 @@ function runProcess(
   cwd: string,
   options?: ExecOptions,
 ): Promise<ExecResult> {
+  const env: Record<string, string | undefined> = { ...process.env, ...options?.env };
+  if (options?.stripPackageManagerEnv) {
+    for (const key of Object.keys(env)) {
+      if (/^(npm_|pnpm_)/i.test(key)) delete env[key];
+    }
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, ...options?.env },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });
