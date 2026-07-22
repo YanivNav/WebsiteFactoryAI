@@ -1,6 +1,7 @@
 import {type ComponentType} from "react";
 import type {Artifact, ArtifactType} from "@factory/shared";
 import type {Id} from "@convex/_generated/dataModel";
+import type {ProjectDetail} from "@/data/useProjectDetail";
 import type {useUserTask} from "@/data/useUserTask";
 import {QuestionnaireEditor, QuestionnaireResponseView} from "../artifacts/QuestionnaireArtifact";
 import {SpecificationArtifactView} from "../artifacts/spec/SpecificationArtifact";
@@ -11,12 +12,18 @@ import {
   WixSetupPlanEditor,
   WixSetupPlanView,
 } from "../artifacts/WixSetupArtifact";
+import {SiteBuildArtifact} from "../artifacts/SiteBuildArtifact";
+import {SiteReleaseView} from "../artifacts/SiteReleaseArtifact";
+import {WebsiteContentView} from "../artifacts/WebsiteContentArtifact";
+import {ManualTasksView} from "../artifacts/ManualTasksArtifact";
 
 type ArtifactContentProps = {
   artifact: Artifact;
   versions: Artifact[];
   subject?: Artifact;
   taskId?: string;
+  /** The full project detail, for Views that resolve sibling artifacts by id. */
+  detail?: ProjectDetail;
 };
 
 export type ArtifactEditorProps = {
@@ -90,6 +97,24 @@ const ARTIFACT_PRESENTATIONS: Partial<Record<ArtifactType, ArtifactPresentation>
   },
   wixProject: {
     View: ({ artifact }) => <WixProjectView artifact={artifact as Artifact<"wixProject">} />,
+  },
+  siteBuild: {
+    View: ({ artifact, taskId, detail }) => (
+      <SiteBuildArtifact
+        artifact={artifact as Artifact<"siteBuild">}
+        taskId={taskId as Id<"userTasks"> | undefined}
+        detail={detail}
+      />
+    ),
+  },
+  siteRelease: {
+    View: ({ artifact }) => <SiteReleaseView artifact={artifact as Artifact<"siteRelease">} />,
+  },
+  websiteContent: {
+    View: ({ artifact }) => <WebsiteContentView artifact={artifact as Artifact<"websiteContent">} />,
+  },
+  manualTasks: {
+    View: ({ artifact }) => <ManualTasksView artifact={artifact as Artifact<"manualTasks">} />,
   },
 };
 

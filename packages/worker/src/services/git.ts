@@ -72,6 +72,21 @@ export class GitService {
     await workspace.execOrThrow("git", ["remote", "set-url", "origin", repo.cloneUrl]);
   }
 
+  /**
+   * Revert the working tree to the scaffold (the repo's initial commit) while
+   * leaving HEAD and history untouched, so a rebuild starts from a clean
+   * scaffold and the follow-up commit still fast-forwards (never a force-push).
+   * `read-tree` rewrites the index + tracked files to the scaffold's tree;
+   * `clean -fd` drops stray untracked files but keeps gitignored `node_modules`.
+   */
+  async resetToScaffold(workspace: Workspace): Promise<void> {
+    const roots = await workspace.execOrThrow("git", ["rev-list", "--max-parents=0", "HEAD"]);
+    const scaffold = roots.stdout.trim().split("\n").filter(Boolean).at(-1);
+    if (!scaffold) throw new Error("Could not find the scaffold commit to reset to");
+    await workspace.execOrThrow("git", ["read-tree", "--reset", "-u", scaffold]);
+    await workspace.execOrThrow("git", ["clean", "-fd"]);
+  }
+
   /** Commit anything uncommitted and push main — plain push, never force. */
   async commitAndPush(workspace: Workspace, repo: GitHubRepo, message: string): Promise<void> {
     if (!(await workspace.hasFile(".git"))) {

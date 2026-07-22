@@ -2,6 +2,7 @@ import type { Doc } from "@convex/_generated/dataModel";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import { WorkProgress } from "../progress/WorkProgress";
 import { DraftActivity } from "./DraftActivity";
+import { CompletedActivity } from "./CompletedActivity";
 import { UserTaskView } from "../tasks/UserTaskView";
 
 export function ActivityView({
@@ -29,6 +30,7 @@ export function ActivityView({
   }
   if (detail.currentWork) return <WorkProgress detail={detail} />;
   if (detail.project.currentActivity.type === "draft") return <DraftActivity detail={detail} />;
+  if (detail.project.currentActivity.type === "completed") return <CompletedActivity detail={detail} />;
   return <EmptyActivityView />;
 }
 

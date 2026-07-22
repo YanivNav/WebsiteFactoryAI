@@ -105,6 +105,26 @@ export const WORK_DEFINITIONS = {
     inputs: { decision: "wixSetupDecision" },
     output: "wixProject",
     review: { label: "Your Wix site is ready", result: { type: "selectVersion" } },
+    next: "buildSite",
+  },
+  buildSite: {
+    phase: "siteBuild",
+    label: "Building your site",
+    inputs: { specification: "specification", design: "design", project: "wixProject" },
+    output: "siteBuild",
+    // The review is the refine loop: preview + content editing + AI change requests
+    // (a revision that re-runs this op) + manual-task tracking, before publishing.
+    review: { label: "Review your site", result: { type: "selectVersion" } },
+    next: "publishSite",
+  },
+  publishSite: {
+    phase: "publishing",
+    label: "Publishing your site",
+    inputs: { build: "siteBuild", project: "wixProject" },
+    // Distinct output type so OPERATION_FOR_OUTPUT stays 1:1 (wixProject is already
+    // produced by setupWix).
+    output: "siteRelease",
+    review: { label: "Your site is live", result: { type: "selectVersion" } },
     next: "completeProject",
   },
 } as const;

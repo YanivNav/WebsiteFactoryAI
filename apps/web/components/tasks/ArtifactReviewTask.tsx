@@ -91,7 +91,9 @@ export function ArtifactReviewTask({ detail, task, viewedArtifactId, onViewArtif
           />
         </>
       )}
-      renderArtifact={(artifact) => <ArtifactContent artifact={artifact} versions={versions} taskId={task._id} />}
+      renderArtifact={(artifact) => (
+        <ArtifactContent artifact={artifact} versions={versions} taskId={task._id} detail={detail} />
+      )}
       versionLabel="Versions"
       versions={versions}
     />

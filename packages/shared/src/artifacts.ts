@@ -9,6 +9,8 @@ export const ARTIFACT_TYPES = [
   "wixSetupPlan",
   "wixSetupDecision",
   "wixProject",
+  "siteBuild",
+  "siteRelease",
   "manualTasks",
   "qaPlan",
   "qaResult",
@@ -26,10 +28,12 @@ const artifactTypeMap = {
   wixSetupPlan: {} as WixSetupPlan,
   wixSetupDecision: {} as WixSetupDecision,
   wixProject: {} as WixProject,
-  manualTasks: {},
+  siteBuild: {} as SiteBuild,
+  siteRelease: {} as SiteRelease,
+  manualTasks: {} as ManualTasks,
   qaPlan: {},
   qaResult: {},
-  websiteContent: {},
+  websiteContent: {} as WebsiteContent,
 } satisfies Record<ArtifactType, unknown>;
 
 type ArtifactTypeMap = typeof artifactTypeMap;
@@ -462,3 +466,66 @@ export const WixProjectSchema = z.object({
     .optional(),
 });
 export type WixProject = z.infer<typeof WixProjectSchema>;
+
+// ---------------------------------------------------------------------------
+// Site build: owner content, manual tasks/questions, build output, release.
+// ---------------------------------------------------------------------------
+
+/**
+ * One-off owner content the generated code bakes in (the hybrid model's in-app
+ * half; repeating/structured content lives in Wix CMS + Media Manager instead).
+ * `assetId` points at a Convex-stored upload for image/logo kinds.
+ */
+export const WebsiteContentSchema = z.object({
+  items: z.array(
+    z.object({
+      key: z.string().describe("Stable slot id the generated code reads, e.g. 'home.hero.title'"),
+      label: z.string().describe("Human label shown in the content form"),
+      kind: z.enum(["text", "longtext", "image", "logo"]),
+      page: z.string().optional().describe("Page path this content belongs to, for grouping"),
+      placeholder: z.string().optional().describe("Placeholder value used until the owner provides one"),
+      value: z.string().nullable().describe("The owner's value; null means unfilled (use placeholder)"),
+      assetId: z.string().optional().describe("Convex storage id of an uploaded image/logo"),
+    }),
+  ),
+});
+export type WebsiteContent = z.infer<typeof WebsiteContentSchema>;
+
+/**
+ * Things the build raised for the owner: questions that arose beyond the
+ * questions phase, and genuinely-manual setup the factory could not automate
+ * (payments, Premium, domain). `dashboardUrl` is derived from a real site id
+ * only — never fabricated.
+ */
+export const ManualTasksSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(["question", "manualTask"]),
+      title: z.string(),
+      detail: z.string(),
+      dashboardUrl: z.string().optional(),
+      status: z.enum(["open", "done"]),
+    }),
+  ),
+});
+export type ManualTasks = z.infer<typeof ManualTasksSchema>;
+
+/** One iteration of the built site; each refine pass appends a new version. */
+export const SiteBuildSchema = z.object({
+  summary: z.string().describe("A short, plain-language description of what this build produced"),
+  repoRevision: z.string().describe("The git commit the build pushed"),
+  previewUrl: z.string().optional().describe("Shareable Wix preview URL for this build"),
+  contentArtifactId: z.string().optional().describe("The websiteContent version this build baked in"),
+  manualTasksArtifactId: z.string().optional().describe("The manualTasks version this build raised"),
+  installedApps: z.array(z.string()).describe("Business-solution app ids installed for this site"),
+  unitsBuilt: z.array(z.string()).describe("The build units completed, e.g. 'page:/about'"),
+});
+export type SiteBuild = z.infer<typeof SiteBuildSchema>;
+
+/** The published site: the live URL from `wix release` (absent if it wasn't reported). */
+export const SiteReleaseSchema = z.object({
+  liveUrl: z.string().optional().describe("The live site URL, when publishing reported one"),
+  repoRevision: z.string().describe("The git commit that was released"),
+});
+export type SiteRelease = z.infer<typeof SiteReleaseSchema>;

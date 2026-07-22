@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { Artifact, ArtifactType } from "@factory/shared";
 import { ArtifactVersionPicker } from "./ArtifactVersionPicker";
 
@@ -26,12 +26,23 @@ export function ArtifactReview<T extends ArtifactType>({
   const initialId = proposedArtifactId ?? approvedArtifactId ?? versions[0]?.id;
 
   // Selection is owned by the workspace so the header (revisit) and this review
-  // agree on the current version. Seed or repair it whenever the versions change.
+  // agree on the current version. Two cases to handle:
+  //   1. A newly *proposed* version arrived (a revision produced a new version):
+  //      follow it, even if the previously-viewed version is still valid.
+  //   2. The viewed version is no longer valid (task/subject changed): repair it.
+  // A manual version-chip click changes viewedArtifactId but not proposedArtifactId,
+  // so it is never overridden.
+  const lastProposed = useRef<string | undefined>(undefined);
   useEffect(() => {
+    if (proposedArtifactId && proposedArtifactId !== lastProposed.current) {
+      lastProposed.current = proposedArtifactId;
+      if (proposedArtifactId !== viewedArtifactId) onView(proposedArtifactId);
+      return;
+    }
     if (initialId && !versions.some((version) => version.id === viewedArtifactId)) {
       onView(initialId);
     }
-  }, [initialId, versions, viewedArtifactId, onView]);
+  }, [proposedArtifactId, initialId, versions, viewedArtifactId, onView]);
 
   const artifact = useMemo(
     () =>

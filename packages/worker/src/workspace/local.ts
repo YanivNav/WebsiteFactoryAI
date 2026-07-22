@@ -6,6 +6,9 @@ import type { ExecOptions, ExecResult, Workspace } from ".";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** Directories never worth listing/walking. */
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".astro", ".cache"]);
+
 /**
  * Where per-project checkouts live. `workspaces/` at the repo root (gitignored,
  * disposable — a lost workspace is a lost cache, not lost code), overridable
@@ -52,6 +55,31 @@ export class LocalWorkspace implements Workspace {
     const absolute = path.join(this.root, relativePath);
     await mkdir(path.dirname(absolute), { recursive: true });
     await writeFile(absolute, content, "utf8");
+  }
+
+  async list(relativeDir: string, options?: { recursive?: boolean }): Promise<string[]> {
+    const recursive = options?.recursive ?? true;
+    const start = path.join(this.root, relativeDir);
+    const files: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return; // Missing directory → empty.
+      }
+      for (const entry of entries) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (recursive) await walk(absolute);
+        } else {
+          files.push(path.relative(this.root, absolute));
+        }
+      }
+    };
+    await walk(start);
+    return files;
   }
 
   async exec(command: string, args: string[], options?: ExecOptions): Promise<ExecResult> {

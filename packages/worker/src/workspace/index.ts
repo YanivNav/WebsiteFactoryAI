@@ -43,6 +43,12 @@ export interface Workspace {
   hasFile(relativePath: string): Promise<boolean>;
   readFile(relativePath: string): Promise<string>;
   writeFile(relativePath: string, content: string): Promise<void>;
+  /**
+   * List file paths (relative to the checkout root) under a directory. Recursive
+   * by default, skipping heavy/irrelevant dirs (node_modules, .git, dist, .astro).
+   * A missing directory yields an empty list.
+   */
+  list(relativeDir: string, options?: { recursive?: boolean }): Promise<string[]>;
 
   /** Run a command inside the checkout (or its parent for scaffolding). */
   exec(command: string, args: string[], options?: ExecOptions): Promise<ExecResult>;

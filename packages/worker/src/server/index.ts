@@ -16,6 +16,10 @@ export type WorkRevision = {
   feedback?: string;
   /** When set, the revision targets a single design screen (by page path). */
   screenPath?: string;
+  /** When set, a site-build revision bakes in this owner-content artifact. */
+  contentArtifactId?: string;
+  /** When true, revert the generated code to the fresh scaffold before rebuilding. */
+  cleanRebuild?: boolean;
 };
 
 export type ArtifactAsset = {

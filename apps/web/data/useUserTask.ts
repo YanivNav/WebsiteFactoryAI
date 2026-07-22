@@ -5,13 +5,24 @@ import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 
-type TaskAction = "complete" | "revise" | "revisit" | "delete";
+type TaskAction = "complete" | "revise" | "revisit" | "delete" | "applyContent";
+
+export interface ContentItemInput {
+  key: string;
+  label: string;
+  kind: "text" | "longtext" | "image" | "logo";
+  page?: string;
+  placeholder?: string;
+  value: string | null;
+  assetId?: string;
+}
 
 export function useUserTask() {
   const completeMutation = useMutation(api.projects.completeUserTask);
   const reviseMutation = useMutation(api.projects.reviseCurrentTask);
   const revisitMutation = useMutation(api.projects.revisitUserTask);
   const deleteMutation = useMutation(api.projects.deleteArtifact);
+  const applyContentMutation = useMutation(api.projects.applyContent);
   const [busy, setBusy] = useState<TaskAction | null>(null);
 
   const execute = useCallback(async (action: TaskAction, callback: () => Promise<unknown>) => {
@@ -55,5 +66,14 @@ export function useUserTask() {
     [deleteMutation, execute],
   );
 
-  return { complete, revise, revisit, deleteVersion, busy };
+  const applyContent = useCallback(
+    (input: {
+      userTaskId: Id<"userTasks">;
+      sourceArtifactId: Id<"artifacts">;
+      items: ContentItemInput[];
+    }) => execute("applyContent", () => applyContentMutation(input)),
+    [applyContentMutation, execute],
+  );
+
+  return { complete, revise, revisit, deleteVersion, applyContent, busy };
 }

@@ -13,6 +13,13 @@ export const revisionValidator = v.object({
   // When set, the revision targets a single design screen (by page path) rather
   // than the whole artifact.
   screenPath: v.optional(v.string()),
+  // When set, a site-build revision bakes in this owner-content version (the
+  // refine loop's content-edit path). Carried on the revision rather than as a
+  // work input so the standard input contract stays stable.
+  contentArtifactId: v.optional(v.id("artifacts")),
+  // When true, a site-build reverts the generated code to the fresh scaffold
+  // before rebuilding — a clean regeneration in the same project.
+  cleanRebuild: v.optional(v.boolean()),
 });
 
 export const userTaskResultValidator = v.union(

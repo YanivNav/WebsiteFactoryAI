@@ -86,6 +86,13 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
     return artifact;
   }
 
+  /** Fetch any artifact of the project by id, checking its type. */
+  async getArtifact<T extends ArtifactType>(type: T, artifactId: string): Promise<Artifact<T> | null> {
+    const artifact = await this.server.getArtifact<T>(this.work.projectId, artifactId);
+    if (!artifact || artifact.type !== type) return null;
+    return artifact;
+  }
+
   addArtifact<T extends ArtifactType>(
     outputKey: string,
     type: T,

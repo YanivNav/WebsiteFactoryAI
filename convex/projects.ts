@@ -199,6 +199,152 @@ export const reviseCurrentTask = mutation({
   },
 });
 
+/** Upload URL for owner-provided content assets (images, logo). Single-user app. */
+export const generateContentUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => ctx.storage.generateUploadUrl(),
+});
+
+const contentItemValidator = v.object({
+  key: v.string(),
+  label: v.string(),
+  kind: v.union(v.literal("text"), v.literal("longtext"), v.literal("image"), v.literal("logo")),
+  page: v.optional(v.string()),
+  placeholder: v.optional(v.string()),
+  value: v.union(v.string(), v.null()),
+  assetId: v.optional(v.string()),
+});
+
+/**
+ * The refine loop's content-edit path: the owner edits the site's one-off
+ * content, which creates a new `websiteContent` version and re-runs the build
+ * to bake it in. AI text changes go through `reviseCurrentTask` instead.
+ */
+export const applyContent = mutation({
+  args: {
+    userTaskId: v.id("userTasks"),
+    sourceArtifactId: v.id("artifacts"),
+    items: v.array(contentItemValidator),
+  },
+  handler: async (ctx, { userTaskId, sourceArtifactId, items }) => {
+    const task = await ctx.db.get(userTaskId);
+    if (!task || task.status !== "open") throw new Error("This task is no longer open");
+    const project = await requireProject(ctx, task.projectId);
+    if (
+      project.currentActivity.type !== "userTask" ||
+      project.currentActivity.userTaskId !== task._id
+    ) {
+      throw new Error("This is not the current task");
+    }
+    const source = await requireTaskArtifact(ctx, task, sourceArtifactId);
+    if (source.type !== "siteBuild" || !source.createdByWorkId) {
+      throw new Error("Content can only be applied to a site build");
+    }
+    const producingWork = await ctx.db.get(source.createdByWorkId);
+    if (!producingWork || producingWork.projectId !== project._id) {
+      throw new Error("The original work is unavailable");
+    }
+
+    // New content version based on whatever the build baked in.
+    const baseContentId = (source.data as { contentArtifactId?: Id<"artifacts"> }).contentArtifactId;
+    const contentId = await insertArtifact(ctx, {
+      projectId: project._id,
+      type: "websiteContent",
+      data: { items },
+      basedOnArtifactId: baseContentId,
+      createdByUserTaskId: task._id,
+    });
+
+    await cancelTaskAndContinuation(ctx, task);
+    const workId = await insertWork(
+      ctx,
+      project._id,
+      {
+        phase: producingWork.phase,
+        label: producingWork.label,
+        instruction: {
+          ...producingWork.instruction,
+          revision: { mode: "revise", baseArtifactId: source._id, contentArtifactId: contentId },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Post-publish change: a resting (`completed`) project re-enters the build stage
+ * with a plain-language change request, based on its latest build. It then flows
+ * through the same refine → publish path again.
+ */
+export const requestSiteChange = mutation({
+  args: { projectId: v.id("projects"), feedback: v.string() },
+  handler: async (ctx, { projectId, feedback }) => {
+    const note = feedback.trim();
+    if (!note) throw new Error("Describe the change you'd like");
+    const project = await requireProject(ctx, projectId);
+
+    const latestBuild = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+      .order("desc")
+      .first();
+    if (!latestBuild) throw new Error("This project has no build to change");
+
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      project._id,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "revise", baseArtifactId: latestBuild._id, feedback: note },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Regenerate the site code from a clean scaffold, reusing the same Wix site,
+ * repository, spec, design, and owner content. Works whether the project is on
+ * the build review or resting (completed). Used to test build-quality changes
+ * without the agent building over previously-generated code.
+ */
+export const rebuildSiteClean = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    const latestBuild = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+      .order("desc")
+      .first();
+    if (!latestBuild) throw new Error("This project has no build to rebuild");
+
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      project._id,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "regenerate", baseArtifactId: latestBuild._id, cleanRebuild: true },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
+  },
+});
+
 /**
  * Queue a revision for a single screen while its design work is still generating.
  * The running handler drains pending rows after each screen and regenerates the

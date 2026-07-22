@@ -1,7 +1,7 @@
 import { type LanguageModel, Output, ToolLoopAgent, type ToolSet } from "ai";
 import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
 import { loadPrompt, type PromptName } from "../lib/prompts";
+import { resolveModel } from "./model";
 
 export interface GenerateObjectRequest<T> {
   model?: LanguageModel;
@@ -14,7 +14,7 @@ export interface GenerateObjectRequest<T> {
 export class LLMService {
   async generateObject<T>(request: GenerateObjectRequest<T>): Promise<T> {
     const agent = new ToolLoopAgent({
-      model: request.model || openai("gpt-5"),
+      model: request.model || resolveModel(process.env.LLM_MODEL ?? "gpt-5"),
       instructions: loadPrompt(request.instructions),
       output: Output.object({ schema: z.object({ result: request.schema }) }),
       tools: request.tools ?? {},
