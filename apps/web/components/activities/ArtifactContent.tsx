@@ -5,6 +5,12 @@ import type {useUserTask} from "@/data/useUserTask";
 import {QuestionnaireEditor, QuestionnaireResponseView} from "../artifacts/QuestionnaireArtifact";
 import {SpecificationArtifactView} from "../artifacts/spec/SpecificationArtifact";
 import {DesignArtifact} from "@/components/artifacts/DesignArtifact";
+import {
+  WixProjectView,
+  WixSetupDecisionView,
+  WixSetupPlanEditor,
+  WixSetupPlanView,
+} from "../artifacts/WixSetupArtifact";
 
 type ArtifactContentProps = {
   artifact: Artifact;
@@ -66,6 +72,24 @@ const ARTIFACT_PRESENTATIONS: Partial<Record<ArtifactType, ArtifactPresentation>
         taskId={taskId as Id<"userTasks"> | undefined}
       />
     ),
+  },
+  wixSetupPlan: {
+    View: ({ artifact }) => <WixSetupPlanView artifact={artifact as Artifact<"wixSetupPlan">} />,
+    Editor: ({ artifact, previousResult, ...actions }) => (
+      <WixSetupPlanEditor
+        artifact={artifact as Artifact<"wixSetupPlan">}
+        previousResult={previousResult as Artifact<"wixSetupDecision"> | undefined}
+        {...actions}
+      />
+    ),
+  },
+  wixSetupDecision: {
+    View: ({ artifact }) => (
+      <WixSetupDecisionView artifact={artifact as Artifact<"wixSetupDecision">} />
+    ),
+  },
+  wixProject: {
+    View: ({ artifact }) => <WixProjectView artifact={artifact as Artifact<"wixProject">} />,
   },
 };
 

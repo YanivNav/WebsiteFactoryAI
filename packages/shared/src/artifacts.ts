@@ -6,6 +6,9 @@ export const ARTIFACT_TYPES = [
   "questionnaireResponse",
   "specification",
   "design",
+  "wixSetupPlan",
+  "wixSetupDecision",
+  "wixProject",
   "manualTasks",
   "qaPlan",
   "qaResult",
@@ -20,6 +23,9 @@ const artifactTypeMap = {
   questionnaireResponse: {} as QuestionnaireResponse,
   specification: {} as Specification,
   design: {} as Design,
+  wixSetupPlan: {} as WixSetupPlan,
+  wixSetupDecision: {} as WixSetupDecision,
+  wixProject: {} as WixProject,
   manualTasks: {},
   qaPlan: {},
   qaResult: {},
@@ -382,3 +388,77 @@ export const DesignSchema = z.object({
 });
 export type DesignScreen = z.infer<typeof DesignScreenSchema>;
 export type Design = z.infer<typeof DesignSchema>;
+
+// ---------------------------------------------------------------------------
+// Wix setup: hosting recommendation → user decision → provisioned project.
+// ---------------------------------------------------------------------------
+
+export const WIX_HOSTING_OPTIONS = ["wixManaged", "selfManaged"] as const;
+export type WixHosting = (typeof WIX_HOSTING_OPTIONS)[number];
+
+export const WIX_HOSTING_LABELS: Record<WixHosting, string> = {
+  wixManaged: "Wix-managed",
+  selfManaged: "Self-managed",
+};
+
+/** The AI's analysis of which hosting setup fits the approved site plan. */
+export const WixSetupPlanSchema = z.object({
+  recommendation: z.enum(WIX_HOSTING_OPTIONS),
+  summary: z
+    .string()
+    .describe(
+      "One short paragraph, in plain non-technical language, explaining the recommendation",
+    ),
+  factors: z
+    .array(
+      z.object({
+        capability: z
+          .string()
+          .describe("A capability the site plan needs, e.g. 'Online store checkout'"),
+        wixManaged: z.string().describe("How Wix-managed hosting handles this capability"),
+        selfManaged: z.string().describe("How self-managed hosting handles this capability"),
+        favors: z
+          .enum([...WIX_HOSTING_OPTIONS, "either"])
+          .describe("Which option handles this capability better"),
+      }),
+    )
+    .describe("Only capabilities where the choice actually matters or the user should know"),
+});
+export type WixSetupPlan = z.infer<typeof WixSetupPlanSchema>;
+
+/** The user's hosting choice, submitted from the setup review task. */
+export const WixSetupDecisionSchema = z.object({
+  hosting: z.enum(WIX_HOSTING_OPTIONS),
+});
+export type WixSetupDecision = z.infer<typeof WixSetupDecisionSchema>;
+
+/** The provisioned Wix project: repository plus Wix site references. */
+export const WixProjectSchema = z.object({
+  hosting: z.enum(WIX_HOSTING_OPTIONS),
+  folderName: z.string().describe("Checkout folder name under the workspaces root"),
+  repository: z.object({
+    owner: z.string(),
+    name: z.string(),
+    url: z.string(),
+    defaultBranch: z.string(),
+  }),
+  wix: z.object({
+    siteId: z.string().optional().describe("The Wix site / metasite id, when provisioned"),
+    dashboardUrl: z
+      .string()
+      .optional()
+      .describe("Derived from the real site id only — never fabricated"),
+    liveUrl: z.string().optional(),
+  }),
+  /** Steps the factory could not automate; shown to the user on review. */
+  pendingSetup: z
+    .array(
+      z.object({
+        title: z.string(),
+        instructions: z.string(),
+        url: z.string().optional().describe("A documented, real URL only"),
+      }),
+    )
+    .optional(),
+});
+export type WixProject = z.infer<typeof WixProjectSchema>;

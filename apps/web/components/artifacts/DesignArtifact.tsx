@@ -1,5 +1,5 @@
 import type {Artifact} from "@factory/shared";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -191,15 +191,22 @@ export function ZoomOverlay({
   onClose: () => void;
   title?: string;
 }) {
+  // Lock the page behind the overlay and close on Escape.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
   return (
-    <div
-      className="fixed inset-0 z-[100] flex flex-col bg-black/90"
-      onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-      role="dialog"
-    >
+    <div className="fixed inset-0 z-[100] flex flex-col bg-black/90" onClick={onClose} role="dialog">
       {/* Top bar */}
       <div className="flex shrink-0 items-center justify-between px-6 py-3">
         <h3 className="text-sm font-semibold text-white/80">{title}</h3>
@@ -212,13 +219,12 @@ export function ZoomOverlay({
         </button>
       </div>
 
-      {/* Image — fills remaining space */}
-      <div
-        className="flex flex-1 items-center justify-center p-4">
+      {/* Scrolls the full-height screenshot; `m-auto` centers smaller images. */}
+      <div className="flex flex-1 overflow-y-auto overscroll-contain p-4">
         <img
           alt={title}
           onClick={(e) => e.stopPropagation()}
-          className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+          className="m-auto max-w-full rounded-lg shadow-2xl"
           src={imageUrl}
         />
       </div>

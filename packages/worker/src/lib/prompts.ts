@@ -14,6 +14,7 @@ export type PromptName =
   | "spec"
   | "design"
   | "screen-change"
+  | "wix-setup"
   | "code"
   | "fix"
   | "qa-repair"

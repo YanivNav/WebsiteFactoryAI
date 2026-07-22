@@ -22,7 +22,7 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
   ) {}
 
   log(level: "info" | "error" | "warn", message: string): void {
-    const prefix = `[${this.work.projectId}] [${this.work.instruction.type}] `;
+    const prefix = `[${this.work.projectTitle}] [${this.work.instruction.type}] `;
     const writer = level === "info" ? console.log : level === "warn" ? console.warn : console.error;
     writer(prefix + message);
     void this.server.appendLog({

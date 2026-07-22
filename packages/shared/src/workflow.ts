@@ -86,6 +86,25 @@ export const WORK_DEFINITIONS = {
     inputs: { specification: "specification" },
     output: "design",
     review: { label: "Review your site design", result: { type: "selectVersion" } },
+    next: "planWixSetup",
+  },
+  planWixSetup: {
+    phase: "wixSetup",
+    label: "Choosing the right Wix setup",
+    inputs: { specification: "specification" },
+    output: "wixSetupPlan",
+    review: {
+      label: "Choose your Wix setup",
+      result: { type: "submitArtifact", artifactType: "wixSetupDecision" },
+    },
+    next: "setupWix",
+  },
+  setupWix: {
+    phase: "wixSetup",
+    label: "Setting up your Wix site",
+    inputs: { decision: "wixSetupDecision" },
+    output: "wixProject",
+    review: { label: "Your Wix site is ready", result: { type: "selectVersion" } },
     next: "completeProject",
   },
 } as const;
