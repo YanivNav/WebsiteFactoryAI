@@ -5,9 +5,6 @@ export const PHASES = [
   "visualDesign",
   "wixSetup",
   "siteBuild",
-  "verification",
-  "finalReview",
-  "publishing",
 ] as const;
 
 export type Phase = (typeof PHASES)[number];
@@ -17,9 +14,6 @@ export const PHASE_LABELS: Record<Phase, string> = {
   visualDesign: "Visual design",
   wixSetup: "Wix setup",
   siteBuild: "Site build",
-  verification: "Verification",
-  finalReview: "Final review",
-  publishing: "Publishing",
 };
 
 export type ProjectMode = "simple" | "developer";
@@ -112,17 +106,19 @@ export const WORK_DEFINITIONS = {
     label: "Building your site",
     inputs: { specification: "specification", design: "design", project: "wixProject" },
     output: "siteBuild",
-    // The review is the refine loop: preview + content editing + AI change requests
-    // (a revision that re-runs this op) + manual-task tracking, before publishing.
+    // Initial build opens a review task — the user can revise or approve.
+    // Approval goes to the ready control panel. Scoped changes from the panel
+    // skip review and return directly to ready.
     review: { label: "Review your site", result: { type: "selectVersion" } },
-    next: "publishSite",
+    next: "completeProject",
   },
+  // publishSite is no longer in the pipeline chain — it is queued standalone by
+  // the publishSite mutation from the control panel. Definition kept so the
+  // handler can be looked up via OPERATION_FOR_OUTPUT.
   publishSite: {
-    phase: "publishing",
+    phase: "siteBuild",
     label: "Publishing your site",
     inputs: { build: "siteBuild", project: "wixProject" },
-    // Distinct output type so OPERATION_FOR_OUTPUT stays 1:1 (wixProject is already
-    // produced by setupWix).
     output: "siteRelease",
     review: { label: "Your site is live", result: { type: "selectVersion" } },
     next: "completeProject",

@@ -7,7 +7,7 @@ import { api } from "@convex/_generated/api";
 import type { Doc, Id } from "@convex/_generated/dataModel";
 
 export type ArtifactsMap = { [T in ArtifactType]: Artifact<T>[] };
-export type ActivityStatus = "draft" | "working" | "waiting" | "failed" | "completed";
+export type ActivityStatus = "draft" | "working" | "waiting" | "failed" | "ready" | "completed";
 
 /** The live state of one screen while a design work is running. */
 export interface ScreenInfo {
@@ -81,8 +81,11 @@ function describeActivity(
   if (project.currentActivity.type === "draft") {
     return { phase: "sitePlan", label: "Draft", status: "draft" };
   }
+  if (project.currentActivity.type === "ready") {
+    return { phase: "siteBuild", label: "Ready", status: "ready" };
+  }
   if (project.currentActivity.type === "completed") {
-    return { phase: "publishing", label: "Live", status: "completed" };
+    return { phase: "siteBuild", label: "Live", status: "completed" };
   }
   if (project.currentActivity.type === "userTask" && task) {
     return { phase: task.phase, label: task.label, status: "waiting" };

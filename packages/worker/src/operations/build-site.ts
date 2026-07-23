@@ -6,7 +6,7 @@ import { dashboardLink } from "../services/wix-dashboard-links";
 import { WixService } from "../services/wix";
 import { LocalWorkspace } from "../workspace";
 import type { WorkContext } from "./context";
-import { reviewCompletion, type WorkHandler } from "./types";
+import { readyCompletion, reviewCompletion, type WorkHandler } from "./types";
 
 let git: GitService;
 let wix: WixService;
@@ -24,8 +24,39 @@ export const buildSite: WorkHandler<"buildSite"> = {
     ]);
     const spec = specArtifact.data;
     const project = projectArtifact.data;
-    const previousBuild = await ctx.getRevisionBase("siteBuild");
     const revision = ctx.work.instruction.revision;
+
+    git ??= new GitService();
+    wix ??= new WixService();
+
+    // Dev-only: just start the dev server and return the localhost URL.
+    if ((revision as Record<string, unknown> | undefined)?.["devOnly"]) {
+      const devWorkspace = new LocalWorkspace(project.folderName);
+      const repo = await git.ensureRepo(project.folderName);
+      if (!(await devWorkspace.exists())) await git.restore(devWorkspace, repo);
+      await ctx.progress(30, "Starting the dev server");
+      const { siteUrl: devUrl, dashboardUrl: devDashboardUrl } = await wix.dev(ctx, devWorkspace);
+      if (!devUrl) ctx.log("warn", "Dev server started but no URL was found");
+      return readyCompletion({ devUrl: devUrl ?? undefined, dashboardUrl: devDashboardUrl });
+    }
+
+    // Preview-only: build and generate a fresh preview URL.
+    if ((revision as Record<string, unknown> | undefined)?.["previewOnly"]) {
+      const prevWorkspace = new LocalWorkspace(project.folderName);
+      const repo = await git.ensureRepo(project.folderName);
+      if (!(await prevWorkspace.exists())) await git.restore(prevWorkspace, repo);
+      await ctx.progress(20, "Building for preview");
+      const buildResult = await runBuild(prevWorkspace);
+      if (buildResult.ok) {
+        await ctx.progress(60, "Creating a fresh preview");
+        const { siteUrl: previewUrl, dashboardUrl: previewDashboardUrl } = await wix.preview(ctx, prevWorkspace);
+        return readyCompletion({ previewUrl, dashboardUrl: previewDashboardUrl });
+      }
+      ctx.log("warn", `Preview build failed: ${buildResult.failure.stderr.slice(-500)}`);
+      return readyCompletion();
+    }
+
+    const previousBuild = await ctx.getRevisionBase("siteBuild");
 
     // Owner content baked into this build: an explicit content version from the
     // refine loop's content-edit, else whatever the previous build baked.
@@ -41,8 +72,6 @@ export const buildSite: WorkHandler<"buildSite"> = {
       }
     }
 
-    git ??= new GitService();
-    wix ??= new WixService();
     code ??= new CodeGenerator();
 
     const workspace = new LocalWorkspace(project.folderName);
@@ -136,7 +165,9 @@ export const buildSite: WorkHandler<"buildSite"> = {
         const url = designAssets.get(screen.htmlAssetId)?.url;
         if (url) designHtmlUrls[screen.path] = url;
       }
-      const built = await code.build(ctx, {
+      const isRefine = revision?.mode === "revise" && !!revision?.feedback;
+      const buildOrRefine = isRefine ? code.refine.bind(code) : code.build.bind(code);
+      const built = await buildOrRefine(ctx, {
         workspace,
         spec,
         design: designArtifact.data,
@@ -197,9 +228,12 @@ export const buildSite: WorkHandler<"buildSite"> = {
 
     // 6. Preview (only meaningful when the build succeeded).
     let previewUrl: string | undefined;
+    let dashboardUrl: string | undefined;
     if (buildOk.ok) {
       await ctx.progress(84, "Creating a preview you can see");
-      previewUrl = await wix.preview(ctx, workspace);
+      const preview = await wix.preview(ctx, workspace);
+      previewUrl = preview.siteUrl;
+      dashboardUrl = preview.dashboardUrl;
     }
 
     // 7. Back up the code.
@@ -215,6 +249,9 @@ export const buildSite: WorkHandler<"buildSite"> = {
     const repoRevision = (await workspace.exec("git", ["rev-parse", "HEAD"])).stdout.trim();
 
     // 8. Emit content + manual-task artifacts, then the build (referencing them).
+    //    In revise mode, content and manual-task artifacts are new versions;
+    //    the siteBuild artifact is updated in place — git holds the history.
+    const isRevise = revision && revision.mode !== "initial";
     const contentArtifact = await ctx.addArtifact(
       "content",
       "websiteContent",
@@ -225,14 +262,23 @@ export const buildSite: WorkHandler<"buildSite"> = {
     const build: SiteBuild = {
       summary,
       repoRevision,
+      builtAt: Date.now(),
       previewUrl,
+      dashboardUrl,
       contentArtifactId: contentArtifact.id,
       manualTasksArtifactId: manualArtifact.id,
       installedApps,
       unitsBuilt: reports.unitsBuilt,
     };
     await ctx.progress(96, "Finishing up");
-    const buildArtifact = await ctx.addArtifact("siteBuild", "siteBuild", build, previousBuild?.id);
+    if (isRevise && previousBuild) {
+      await ctx.updateArtifact(previousBuild.id, "siteBuild", build);
+    } else {
+      await ctx.addArtifact("siteBuild", "siteBuild", build, previousBuild?.id);
+    }
+    // Initial build gets a review task (user can revise or approve → ready).
+    // Scoped changes from the control panel go straight back to ready.
+    if (revision && revision.mode !== "initial") return readyCompletion();
     return reviewCompletion("buildSite", buildArtifact.id);
   },
 };

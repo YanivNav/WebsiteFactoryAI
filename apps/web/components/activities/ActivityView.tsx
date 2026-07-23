@@ -3,6 +3,7 @@ import type { ProjectDetail } from "@/data/useProjectDetail";
 import { WorkProgress } from "../progress/WorkProgress";
 import { DraftActivity } from "./DraftActivity";
 import { CompletedActivity } from "./CompletedActivity";
+import { SiteControlPanel } from "../SiteControlPanel";
 import { UserTaskView } from "../tasks/UserTaskView";
 
 export function ActivityView({
@@ -30,7 +31,8 @@ export function ActivityView({
   }
   if (detail.currentWork) return <WorkProgress detail={detail} />;
   if (detail.project.currentActivity.type === "draft") return <DraftActivity detail={detail} />;
-  if (detail.project.currentActivity.type === "completed") return <CompletedActivity detail={detail} />;
+  if (detail.project.currentActivity.type === "ready") return <SiteControlPanel detail={detail} />;
+  if (detail.project.currentActivity.type === "completed") return <SiteControlPanel detail={detail} />;
   return <EmptyActivityView />;
 }
 

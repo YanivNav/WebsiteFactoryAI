@@ -526,7 +526,9 @@ export type ManualTasks = z.infer<typeof ManualTasksSchema>;
 export const SiteBuildSchema = z.object({
   summary: z.string().describe("A short, plain-language description of what this build produced"),
   repoRevision: z.string().describe("The git commit the build pushed"),
+  builtAt: z.number().optional().describe("Unix-ms timestamp when the build completed"),
   previewUrl: z.string().optional().describe("Shareable Wix preview URL for this build"),
+  dashboardUrl: z.string().optional().describe("Wix dashboard URL for the site"),
   contentArtifactId: z.string().optional().describe("The websiteContent version this build baked in"),
   manualTasksArtifactId: z.string().optional().describe("The manualTasks version this build raised"),
   installedApps: z.array(z.string()).describe("Business-solution app ids installed for this site"),

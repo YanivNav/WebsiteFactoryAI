@@ -132,10 +132,25 @@ export const completeUserTask = mutation({
     const nextWork = WORK_DEFINITIONS[producingOperation].next;
 
     if (nextWork === "completeProject") {
-      await ctx.db.patch(project._id, {
+      // Ensure siteId is in project.wix — it might have only been set on the
+      // WixProject artifact. The control panel needs it for dashboard links.
+      const wixPatch: Record<string, string | undefined> = {};
+      if (!project.wix?.siteId) {
+        const wixProjectId = approvedArtifacts.wixProject;
+        if (wixProjectId) {
+          const wixProject = await ctx.db.get(wixProjectId);
+          const artifactSiteId = (wixProject?.data as { wix?: { siteId?: string } } | undefined)?.wix?.siteId;
+          if (artifactSiteId) wixPatch.siteId = artifactSiteId;
+        }
+      }
+      const patch: Record<string, unknown> = {
         approvedArtifacts,
-        currentActivity: { type: "completed" },
-      });
+        currentActivity: { type: "ready" as const },
+      };
+      if (Object.keys(wixPatch).length > 0) {
+        patch.wix = { ...(project.wix ?? {}), ...wixPatch };
+      }
+      await ctx.db.patch(project._id, patch);
       return;
     }
 
@@ -283,9 +298,9 @@ export const applyContent = mutation({
 });
 
 /**
- * Post-publish change: a resting (`completed`) project re-enters the build stage
- * with a plain-language change request, based on its latest build. It then flows
- * through the same refine → publish path again.
+ * Post-publish change: a resting (`completed`) or ready project re-enters the build
+ * stage with a plain-language change request. It then flows through a scoped agent
+ * run and returns to ready.
  */
 export const requestSiteChange = mutation({
   args: { projectId: v.id("projects"), feedback: v.string() },
@@ -451,6 +466,232 @@ export const revisitUserTask = mutation({
     await ctx.db.patch(sourceTask._id, { status: "cancelled" });
     await ctx.db.patch(project._id, {
       currentActivity: { type: "userTask", userTaskId: newTaskId },
+    });
+  },
+});
+
+/**
+ * Apply owner content edits from the ready control panel — no review task needed.
+ * Creates a new websiteContent version and queues a scoped buildSite to bake it in.
+ */
+export const applyContentReady = mutation({
+  args: {
+    projectId: v.id("projects"),
+    items: v.array(contentItemValidator),
+  },
+  handler: async (ctx, { projectId, items }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("Content can only be applied when the site is ready");
+    }
+    const latestBuild = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+      .order("desc")
+      .first();
+    if (!latestBuild) throw new Error("This project has no build");
+
+    const baseContentId = (latestBuild.data as { contentArtifactId?: Id<"artifacts"> }).contentArtifactId;
+    const contentId = await insertArtifact(ctx, {
+      projectId,
+      type: "websiteContent",
+      data: { items },
+      basedOnArtifactId: baseContentId,
+    });
+
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      projectId,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "revise", baseArtifactId: latestBuild._id, contentArtifactId: contentId },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Request a new screen or a redesign of an existing one from the control panel.
+ * Queues a scoped buildSite work — the agent adds or redesigns the page in place.
+ * (A future iteration will route new screens through Stitch design first.)
+ */
+export const requestScreenChange = mutation({
+  args: {
+    projectId: v.id("projects"),
+    screenPath: v.string(),
+    feedback: v.string(),
+  },
+  handler: async (ctx, { projectId, screenPath, feedback }) => {
+    const note = feedback.trim();
+    if (!note) throw new Error("Describe what you want the screen to look like");
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("Screen changes can only be made when the site is ready");
+    }
+    const latestBuild = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+      .order("desc")
+      .first();
+    if (!latestBuild) throw new Error("This project has no build");
+
+    const existingDesign = project.approvedArtifacts.design;
+    const isRedesign = existingDesign
+      ? ((await ctx.db.get(existingDesign))?.data as { screens?: Array<{ path: string }> } | null)
+          ?.screens?.some((s) => s.path === screenPath)
+      : false;
+    const instruction = isRedesign
+      ? `Redesign the page at ${screenPath}: ${note}`
+      : `Add a new page at ${screenPath}. Design it for the following: ${note}`;
+
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      projectId,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "revise", baseArtifactId: latestBuild._id, feedback: instruction, screenPath },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Return from the control panel to the build timeline so the user can revise
+ * the last build, revisit earlier steps, or restart from the brief.
+ */
+export const returnToBuildMode = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("The site must be ready before returning to build mode");
+    }
+    const latestBuild = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+      .order("desc")
+      .first();
+    if (!latestBuild) throw new Error("This project has no build");
+
+    const taskId = await ctx.db.insert("userTasks", {
+      projectId,
+      phase: "siteBuild",
+      label: "Review your site",
+      subjectArtifactId: latestBuild._id,
+      result: { type: "selectVersion" },
+      status: "open",
+    });
+    await ctx.db.patch(projectId, {
+      currentActivity: { type: "userTask", userTaskId: taskId },
+    });
+  },
+});
+
+/**
+ * Start a local dev server for the site. Queues a lightweight work that runs
+ * `wix dev`, captures the localhost URL, and writes it to the project record.
+ */
+/**
+ * Generate a fresh preview — builds the site and runs `wix preview`, then
+ * writes the preview URL to the project record.
+ */
+export const startPreview = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("Preview can only be generated when the site is ready");
+    }
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      projectId,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "initial", previewOnly: true } as any,
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
+  },
+});
+
+export const startDevServer = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("Dev server can only be started when the site is ready");
+    }
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const existing = project.wix ?? {};
+    const workId = await insertWork(
+      ctx,
+      projectId,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "initial", devOnly: true } as any,
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, {
+      currentActivity: { type: "work", workId },
+      wix: { ...existing, devUrl: "pending" },
+    });
+  },
+});
+
+/**
+ * Publish the site from the control panel — a standalone action, not a pipeline
+ * phase. Queues the release work and returns to ready when it completes.
+ */
+export const publishSite = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("The site must be ready before publishing");
+    }
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("publishSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(ctx, project._id, draft, "queued");
+    // Build a guaranteed dashboard URL from siteId. Try project.wix first,
+    // then fall back to the WixProject artifact (set during site setup).
+    let siteId = project.wix?.siteId;
+    if (!siteId) {
+      const wixProjectId = project.approvedArtifacts.wixProject;
+      if (wixProjectId) {
+        const wixProject = await ctx.db.get(wixProjectId);
+        siteId = (wixProject?.data as { wix?: { siteId?: string } } | undefined)?.wix?.siteId;
+      }
+    }
+    const dashboardUrl = siteId ? `https://manage.wix.com/dashboard/${siteId}/home` : undefined;
+    const existing = project.wix ?? {};
+    await ctx.db.patch(project._id, {
+      currentActivity: { type: "work", workId },
+      wix: { ...existing, dashboardUrl: dashboardUrl ?? existing.dashboardUrl, siteId: siteId ?? existing.siteId },
     });
   },
 });
@@ -763,11 +1004,20 @@ async function resolveActivity(ctx: QueryCtx, project: Doc<"projects">) {
       createdAt: project._creationTime,
     };
   }
+  if (project.currentActivity.type === "ready") {
+    return {
+      type: "ready" as const,
+      label: "Ready",
+      phase: "siteBuild" as const,
+      status: "ready" as const,
+      createdAt: project._creationTime,
+    };
+  }
   if (project.currentActivity.type === "completed") {
     return {
       type: "completed" as const,
       label: "Live",
-      phase: "publishing" as const,
+      phase: "siteBuild" as const,
       status: "completed" as const,
       createdAt: project._creationTime,
     };

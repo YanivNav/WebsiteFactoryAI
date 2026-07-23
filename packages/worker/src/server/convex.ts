@@ -15,6 +15,7 @@ const functions = {
   appendProgress: mutation("worker:appendProgress"),
   getArtifact: query("worker:getArtifact"),
   addArtifact: mutation("worker:addArtifact"),
+  updateArtifact: mutation("worker:updateArtifact"),
   generateUploadUrl: mutation("worker:generateUploadUrl"),
   claimScreenRevisions: mutation("worker:claimScreenRevisions"),
   getFileUrl: query("worker:getFileUrl"),
@@ -82,6 +83,12 @@ export class ConvexServer implements ServerAccess {
     input: Parameters<ServerAccess["addArtifact"]>[0],
   ): Promise<Artifact<T>> {
     return this.client.mutation(functions.addArtifact, input) as Promise<Artifact<T>>;
+  }
+
+  async updateArtifact<T extends ArtifactType>(
+    input: Parameters<ServerAccess["updateArtifact"]>[0],
+  ): Promise<Artifact<T>> {
+    return this.client.mutation(functions.updateArtifact, input) as Promise<Artifact<T>>;
   }
 
   async uploadBlob(

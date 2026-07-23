@@ -22,6 +22,7 @@ export function ProjectWorkspace({
   const {revisit, busy: revisitBusy} = useUserTask();
   const historical = viewedTask && viewedTask._id !== detail.currentUserTask?._id;
   const completed = detail.activityStatus === "completed";
+  const ready = detail.activityStatus === "ready";
   const waiting = detail.activityStatus === "waiting" || detail.activityStatus === "draft";
   const failed = detail.activityStatus === "failed";
   const label = historical ? viewedTask.label : detail.activityLabel;
@@ -37,6 +38,7 @@ export function ProjectWorkspace({
         <div className="flex items-start gap-4">
           <StatusIcon
             completed={completed}
+            ready={ready}
             failed={failed}
             historical={!!historical}
             waiting={waiting}
@@ -57,10 +59,12 @@ export function ProjectWorkspace({
                 : failed
                   ? "Needs attention"
                   : completed
-                    ? "Project complete"
-                    : waiting
-                      ? "Ready for you"
-                      : "In progress"}
+                    ? "Site live"
+                    : ready
+                      ? "Site ready"
+                      : waiting
+                        ? "Ready for you"
+                        : "In progress"}
             </p>
             <div className="flex items-center justify-between gap-4">
               <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{label}</h1>
@@ -110,11 +114,13 @@ export function ProjectWorkspace({
 
 function StatusIcon({
   completed,
+  ready,
   failed,
   historical,
   waiting,
 }: {
   completed: boolean;
+  ready: boolean;
   failed: boolean;
   historical: boolean;
   waiting: boolean;
@@ -124,7 +130,9 @@ function StatusIcon({
       ? "bg-[#f8d9d6] text-[#a82922]"
       : completed
         ? "bg-[#def3e6] text-[#17693a]"
-        : "bg-[#d8e2ff] text-primary"
+        : ready
+          ? "bg-[#def3e6] text-[#17693a]"
+          : "bg-[#d8e2ff] text-primary"
   }`;
   return (
     <span className={className}>

@@ -23,6 +23,10 @@ export const revisionValidator = v.object({
   // When set, restore the site's code to this git commit instead of generating
   // (git is the source of truth for site versions).
   revertToCommit: v.optional(v.string()),
+  // When true, skip code generation and only start the dev server.
+  devOnly: v.optional(v.boolean()),
+  // When true, build the site and generate a fresh preview URL.
+  previewOnly: v.optional(v.boolean()),
 });
 
 export const userTaskResultValidator = v.union(
@@ -59,6 +63,7 @@ export default defineSchema({
       v.object({ type: v.literal("draft") }),
       v.object({ type: v.literal("work"), workId: v.id("works") }),
       v.object({ type: v.literal("userTask"), userTaskId: v.id("userTasks") }),
+      v.object({ type: v.literal("ready") }),
       v.object({ type: v.literal("completed") }),
     ),
     approvedArtifacts: v.record(v.string(), v.id("artifacts")),
@@ -74,6 +79,8 @@ export default defineSchema({
         appId: v.optional(v.string()),
         liveUrl: v.optional(v.string()),
         previewUrl: v.optional(v.string()),
+        devUrl: v.optional(v.string()),
+        dashboardUrl: v.optional(v.string()),
       }),
     ),
     github: v.optional(

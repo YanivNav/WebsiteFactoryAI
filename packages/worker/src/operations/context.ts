@@ -93,6 +93,21 @@ export class WorkContext<K extends WorkOperation = WorkOperation> {
     return artifact;
   }
 
+  /** Update an existing artifact's data in place (for revisions — git holds history). */
+  updateArtifact<T extends ArtifactType>(
+    artifactId: string,
+    type: T,
+    data: ArtifactData<T>,
+    assets?: ArtifactAsset[],
+  ): Promise<Artifact<T>> {
+    return this.server.updateArtifact({
+      artifactId,
+      workerId: this.workerId,
+      data,
+      assets,
+    }) as Promise<Artifact<T>>;
+  }
+
   addArtifact<T extends ArtifactType>(
     outputKey: string,
     type: T,

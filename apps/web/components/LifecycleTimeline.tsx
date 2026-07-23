@@ -34,7 +34,7 @@ export function LifecycleTimeline({
         <ol className="relative space-y-6">
           {PHASES.map((phase, index) => {
             const active = index === currentIndex;
-            const complete = index < currentIndex || detail.activityStatus === "completed";
+            const complete = index < currentIndex || detail.activityStatus === "completed" || detail.activityStatus === "ready";
             const tasks = detail.userTasks.filter(
               (task) => task.phase === phase && task.status !== "cancelled",
             );

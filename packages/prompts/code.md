@@ -23,17 +23,46 @@ The factory hands you the job as files in `.factory/`:
 ## How to work
 
 1. **Explore first.** Read `.factory/brief.json`, the project's `package.json`,
-   `astro.config`, `wix.config.json`, `src/`, and the Wix skill docs installed in the
-   project (look under `.agents/`). Read the Wix skill for an area before writing code
-   for it — they are authoritative and current; don't guess at an API.
-2. **Build page by page.** For each screen, read its `designFile`, then implement the
-   Astro page under `src/pages` at that path, matching the design and the spec's
-   sections. Wire the header/footer once as a shared layout.
-3. **Provision and wire data/workflows** following the skills below — create and seed
-   the CMS collections the spec declares, query them from the pages, and implement each
-   visitor workflow end to end.
-4. **Verify.** Run `npx wix build` after meaningful changes and fix what you break. Do
-   not finish with a failing build.
+   `astro.config`, `wix.config.json`, `src/`, and the Wix skill docs installed in
+   the project under `.agents/skills/`. **Read the Wix skill for an area before
+   writing code for it** — they are authoritative and current; don't guess at an
+   API. The `wix-headless` skill has app IDs, REST call patterns, and inline
+   recipes. The `wix-docs` skill tells you how to search the live Wix docs for
+   anything the installed skills don't cover.
+2. **Build page by page.** For each screen, read its `designFile`, then implement
+   the Astro page under `src/pages` at that path, matching the design and the
+   spec's sections. Wire the header/footer once as a shared layout.
+3. **Provision and wire data/workflows** following the skills below — create and
+   seed the CMS collections the spec declares, query them from the pages, and
+   implement each visitor workflow end to end.
+4. **Verify.** Run `npx wix build` after meaningful changes and fix what you
+   break. Do not finish with a failing build.
+
+## When the SDK doesn't cover a feature
+
+The Wix JavaScript SDK covers the common CRUD operations. When you need
+something the SDK doesn't provide — a host-module feature (`@wix/site-*`) that
+can't work in Headless, or a capability with no `@wix/*` package — don't give
+up. Discover the REST API:
+
+1. **Read the area's factory skill first** (listed below) — it tells you the
+   pattern and what to search for.
+2. **Search the live Wix docs** using the `wix-docs` skill's search tools
+   (`curl` to the docs search endpoint, or browse from `llms.txt`). Find the
+   REST endpoint, confirm the HTTP method and request shape.
+3. **Find app IDs and constants** from the installed skills (`wix-headless`
+   `SETUP.md` has the common app IDs; the "Apps Created by Wix" docs page has
+   the rest) or by searching the docs.
+4. **Mint a CLI token** (managed: `npx @wix/cli@latest token --site
+   "$SITE_ID"`, see `wix-headless` `AUTHENTICATION.md`) and call the REST
+   endpoint directly.
+5. **Only if the REST API genuinely doesn't exist** — you've searched the docs
+   thoroughly and confirmed there's no programmatic path — fall back to a
+   manual task with a dashboard `helpLink`.
+
+This is not a last resort — it's how the platform works. The SDK is a
+convenience, not a boundary. You have `curl`, a CLI token, and the Wix docs
+search. Use them.
 
 ## Reporting back
 

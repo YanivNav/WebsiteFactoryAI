@@ -77,6 +77,7 @@ export type UserTaskDraft = {
 
 export type WorkCompletion =
   | { type: "completeProject" }
+  | { type: "completeAndSetReady"; devUrl?: string; previewUrl?: string; liveUrl?: string; dashboardUrl?: string }
   | { type: "startWork"; work: WorkDraft }
   | { type: "createUserTask"; task: UserTaskDraft };
 
@@ -136,6 +137,13 @@ export interface ServerAccess {
     type: T;
     data: ArtifactData<T>;
     basedOnArtifactId?: string;
+    assets?: ArtifactAsset[];
+  }): Promise<Artifact<T>>;
+  /** Update an existing artifact's data in place (for revisions — git holds history). */
+  updateArtifact<T extends ArtifactType>(input: {
+    artifactId: string;
+    workerId: string;
+    data: ArtifactData<T>;
     assets?: ArtifactAsset[];
   }): Promise<Artifact<T>>;
   /** Upload a blob to file storage and return its storage id. */

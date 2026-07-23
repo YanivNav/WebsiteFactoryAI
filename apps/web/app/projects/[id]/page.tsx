@@ -33,16 +33,22 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const viewedTask = viewedTaskId
     ? detail.userTasks.find((task) => task._id === viewedTaskId)
     : undefined;
+  // Hide timeline once the initial build is approved. All control-panel
+  // operations (scoped changes, dev, preview, publish) happen without the
+  // timeline. "Build mode" brings it back.
+  const controlPanelActive = !!detail.approvedArtifactIds.siteBuild;
   return (
     <div className="min-h-screen bg-[#f8f9fa]">
       <ProjectHeader activityLabel={detail.activityLabel} projectTitle={detail.project.title} />
       <div className="flex min-h-[calc(100vh-56px)]">
-        <LifecycleTimeline
-          detail={detail}
-          onReset={() => setViewedTaskId(undefined)}
-          onViewTask={setViewedTaskId}
-          viewedTaskId={viewedTaskId}
-        />
+        {!controlPanelActive && (
+          <LifecycleTimeline
+            detail={detail}
+            onReset={() => setViewedTaskId(undefined)}
+            onViewTask={setViewedTaskId}
+            viewedTaskId={viewedTaskId}
+          />
+        )}
         <main className="min-w-0 flex-1 p-4 md:p-6">
           <div className="mx-auto max-w-5xl">
             <ProjectWorkspace

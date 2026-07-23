@@ -16,6 +16,7 @@ const workDraftValidator = v.object({
 
 const workCompletionValidator = v.union(
   v.object({ type: v.literal("completeProject") }),
+  v.object({ type: v.literal("completeAndSetReady"), devUrl: v.optional(v.string()), previewUrl: v.optional(v.string()), liveUrl: v.optional(v.string()), dashboardUrl: v.optional(v.string()) }),
   v.object({ type: v.literal("startWork"), work: workDraftValidator }),
   v.object({
     type: v.literal("createUserTask"),
@@ -222,6 +223,31 @@ export const addArtifact = mutation({
   },
 });
 
+/**
+ * Update an existing artifact's data and assets in place. Used when a revision
+ * mutates the same logical artifact rather than creating a new version — git
+ * holds the version history, not the artifact table.
+ */
+export const updateArtifact = mutation({
+  args: {
+    artifactId: v.id("artifacts"),
+    workerId: v.string(),
+    data: v.any(),
+    assets: v.optional(
+      v.array(v.object({ id: v.string(), data: v.any(), storageId: v.id("_storage") })),
+    ),
+  },
+  handler: async (ctx, { artifactId, data, assets }) => {
+    const artifact = await ctx.db.get(artifactId);
+    if (!artifact) throw new Error("Artifact not found");
+    await ctx.db.patch(artifactId, {
+      data,
+      ...(assets !== undefined ? { assets } : {}),
+    });
+    return resolveArtifact(ctx, { ...artifact, data, assets: assets ?? artifact.assets });
+  },
+});
+
 export const completeWork = mutation({
   args: {
     workId: v.id("works"),
@@ -236,9 +262,7 @@ export const completeWork = mutation({
       !project ||
       project.currentActivity.type !== "work" ||
       project.currentActivity.workId !== workId
-    ) {
-      return;
-    }
+    ) return;
     const outputArtifacts = await ctx.db
       .query("artifacts")
       .withIndex("by_work", (q) => q.eq("createdByWorkId", workId))
@@ -294,6 +318,21 @@ export const completeWork = mutation({
 
     if (completion.type === "completeProject") {
       await ctx.db.patch(project._id, { currentActivity: { type: "completed" } });
+      return;
+    }
+    if (completion.type === "completeAndSetReady") {
+      const isLive = !!completion.liveUrl;
+      const wixPatch: Record<string, string | undefined> = {};
+      if (completion.liveUrl) wixPatch.liveUrl = completion.liveUrl;
+      if (completion.previewUrl) wixPatch.previewUrl = completion.previewUrl;
+      if (completion.devUrl) wixPatch.devUrl = completion.devUrl;
+      if (completion.dashboardUrl) wixPatch.dashboardUrl = completion.dashboardUrl;
+      // A publishSite work always means the site is live — respect that even
+      // when the URL scraper couldn't find the site URL in CLI output.
+      const phase = work.instruction.type === "publishSite" ? ("completed" as const) : isLive ? ("completed" as const) : ("ready" as const);
+      const patch: Record<string, unknown> = { currentActivity: { type: phase } };
+      if (Object.keys(wixPatch).length > 0 && project.wix) patch.wix = { ...project.wix, ...wixPatch };
+      await ctx.db.patch(project._id, patch);
       return;
     }
     if (completion.type === "startWork") {

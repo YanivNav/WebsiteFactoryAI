@@ -30,11 +30,11 @@ export default function Home() {
     [projects],
   );
   const live = useMemo(
-    () => projects?.filter(({ activity }) => activity?.type === "completed") ?? [],
+    () => projects?.filter(({ activity }) => activity?.type === "completed" || activity?.type === "ready") ?? [],
     [projects],
   );
   const activeCount =
-    projects?.filter(({ activity }) => activity?.type !== "completed").length ?? 0;
+    projects?.filter(({ activity }) => activity?.type !== "completed" && activity?.type !== "ready").length ?? 0;
 
   const filteredProjects = useMemo(() => {
     const source =
@@ -159,7 +159,7 @@ function FilterButton({
 type ProjectSummary = {
   project: Doc<"projects">;
   activity: {
-    type: "draft" | "work" | "userTask" | "completed";
+    type: "draft" | "work" | "userTask" | "ready" | "completed";
     label: string;
     phase: Phase;
     status: string;
@@ -205,10 +205,10 @@ function ProjectTable({ loading, projects }: { loading: boolean; projects: Proje
 function ProjectRow({ summary }: { summary: ProjectSummary }) {
   const { project, activity } = summary;
   const waiting = activity?.type === "draft" || activity?.type === "userTask";
-  const completed = activity?.type === "completed";
+  const postBuild = activity?.type === "completed" || activity?.type === "ready";
   const failed = activity?.status === "failed";
   const displayStep = Math.max(1, PHASES.indexOf(activity?.phase ?? "sitePlan") + 1);
-  const actionLabel = completed ? "Manage Site" : waiting ? "View Task" : "View Details";
+  const actionLabel = postBuild ? "Manage Site" : waiting ? "View Task" : "View Details";
 
   return (
     <tr className="border-outline h-17.5 border-t text-xs transition-colors hover:bg-[#f9fafb]">
@@ -221,7 +221,7 @@ function ProjectRow({ summary }: { summary: ProjectSummary }) {
         </Link>
         <span className="mt-1 block max-w-[90%] truncate font-mono text-[10px] text-[#777f8c]">
           {project.settings.businessName ||
-            (project.wix?.liveUrl ? safeHostname(project.wix.liveUrl) : "Wix site in progress")}
+            (project.wix?.liveUrl ? safeHostname(project.wix.liveUrl) : project.wix?.siteId ? "Wix site" : "Draft")}
         </span>
       </td>
       <td className="px-4 py-2.5">
@@ -247,7 +247,7 @@ function ProjectRow({ summary }: { summary: ProjectSummary }) {
         </div>
       </td>
       <td className="px-4 py-2.5">
-        <Status waiting={waiting} completed={completed} failed={failed} />
+        <Status waiting={waiting} postBuild={postBuild} failed={failed} />
       </td>
       <td className="px-4 py-2.5 text-[#4e5663]">
         {formatElapsed(activity?.createdAt ?? project._creationTime)}
@@ -266,11 +266,11 @@ function ProjectRow({ summary }: { summary: ProjectSummary }) {
 
 function Status({
   waiting,
-  completed,
+  postBuild,
   failed,
 }: {
   waiting: boolean;
-  completed: boolean;
+  postBuild: boolean;
   failed: boolean;
 }) {
   const base =
@@ -284,7 +284,7 @@ function Status({
         Action needed
       </span>
     );
-  if (completed)
+  if (postBuild)
     return (
       <span className={`${base} border-[#b6dfc6] bg-[#effaf3] font-bold text-[#17693a]`}>
         <i className="size-1.5 rounded-full bg-[#22a75a]" />

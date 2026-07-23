@@ -28,3 +28,8 @@ export function reviewCompletion(
     },
   };
 }
+
+/** Return to ready state, optionally carrying new Wix URLs. */
+export function readyCompletion(opts?: { devUrl?: string; previewUrl?: string; liveUrl?: string; dashboardUrl?: string }): WorkCompletion {
+  return { type: "completeAndSetReady", ...opts };
+}

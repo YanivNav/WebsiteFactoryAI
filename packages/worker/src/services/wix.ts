@@ -266,18 +266,19 @@ export class WixService {
   // ---- Preview & release (CLI, agent mode) -------------------------------
 
   /** `wix preview` → a shareable preview URL for the built site. */
-  async preview(ctx: WorkContext, workspace: Workspace): Promise<string | undefined> {
+  async preview(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string; dashboardUrl?: string }> {
     ctx.log("info", "Creating a Wix preview");
     const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "preview"], {
       env: AGENT_ENV,
       stripPackageManagerEnv: true,
       timeoutMs: SCAFFOLD_TIMEOUT_MS,
     });
-    return pickSiteUrl(ctx, parseAgentEvents(result.stdout), result.stdout, "preview");
+    const events = parseAgentEvents(result.stdout);
+    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "preview"), dashboardUrl: pickDashboardUrl(events, result.stdout) };
   }
 
   /** `wix release` → publishes and returns the live URL. */
-  async release(ctx: WorkContext, workspace: Workspace): Promise<string | undefined> {
+  async release(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string; dashboardUrl?: string }> {
     ctx.log("info", "Publishing the site with Wix");
     const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "release"], {
       env: AGENT_ENV,
@@ -287,7 +288,23 @@ export class WixService {
     if (result.code !== 0) {
       throw new Error(`Wix release failed: ${agentError(parseAgentEvents(result.stdout)) ?? tail(result.stderr || result.stdout)}`);
     }
-    return pickSiteUrl(ctx, parseAgentEvents(result.stdout), result.stdout, "published");
+    const events = parseAgentEvents(result.stdout);
+    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "published"), dashboardUrl: pickDashboardUrl(events, result.stdout) };
+  }
+
+  /** `wix dev` → starts a local dev server and returns the localhost URL. */
+  async dev(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string; dashboardUrl?: string }> {
+    ctx.log("info", "Starting Wix dev server");
+    const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "dev"], {
+      env: AGENT_ENV,
+      stripPackageManagerEnv: true,
+      timeoutMs: SCAFFOLD_TIMEOUT_MS,
+    });
+    if (result.code !== 0) {
+      throw new Error(`Wix dev failed: ${agentError(parseAgentEvents(result.stdout)) ?? tail(result.stderr || result.stdout)}`);
+    }
+    const events = parseAgentEvents(result.stdout);
+    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "dev"), dashboardUrl: pickDashboardUrl(events, result.stdout) };
   }
 
   private async rest<T = unknown>(
@@ -344,6 +361,9 @@ function agentError(events: AgentEvent[]): string | undefined {
 // URLs the CLI prints that are never the site itself: the dashboard, docs, and
 // account/marketing pages. The dashboard lives at manage.wix.com/dashboard.
 const NON_SITE_URL = /manage\.wix\.com|\/dashboard|dev\.wix\.com|support\.wix|www\.wix\.com|wix\.com\/app-market/i;
+
+// Dashboard URLs contain manage.wix.com/dashboard — the inverse of NON_SITE_URL.
+const DASHBOARD_URL = /manage\.wix\.com\/dashboard/i;
 
 interface UrlCandidate {
   url: string;
@@ -415,6 +435,13 @@ function pickSiteUrl(
     `Wix ${intent} URL candidates: ${[...new Set(ranked.map((c) => c.url))].slice(0, 6).join(" | ")}`,
   );
   return ranked[0]?.url;
+}
+
+function pickDashboardUrl(events: AgentEvent[], output: string): string | undefined {
+  const candidates = collectUrls(events, output).filter((c) => DASHBOARD_URL.test(c.url));
+  // Pick the shortest dashboard URL — usually the cleanest home link.
+  candidates.sort((a, b) => a.url.length - b.url.length);
+  return candidates[0]?.url;
 }
 
 function tail(text: string, chars = 800): string {

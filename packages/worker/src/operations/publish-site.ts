@@ -2,7 +2,7 @@ import type { SiteRelease } from "@factory/shared";
 import { GitService } from "../services/git";
 import { WixService } from "../services/wix";
 import { LocalWorkspace } from "../workspace";
-import { reviewCompletion, type WorkHandler } from "./types";
+import { readyCompletion, type WorkHandler } from "./types";
 
 let git: GitService;
 let wix: WixService;
@@ -30,17 +30,17 @@ export const publishSite: WorkHandler<"publishSite"> = {
     }
 
     await ctx.progress(40, "Publishing your site");
-    // `release` throws only when the CLI itself fails. If it succeeds but we
-    // couldn't scrape the URL from its output, the site is still published — so
-    // record the release without a URL rather than failing the whole stage.
-    const liveUrl = await wix.release(ctx, workspace);
-    if (!liveUrl) {
-      ctx.log("warn", "Published, but no live URL was found in the CLI output");
+    const { siteUrl: liveUrl, dashboardUrl: liveDashboardUrl } = await wix.release(ctx, workspace);
+    // The site is published regardless of whether we scraped the URL. Show
+    // whatever we could get; the dashboard link is always better than nothing.
+    if (!liveUrl && !liveDashboardUrl) {
+      ctx.log("warn", "Published, but neither a site URL nor a dashboard URL was found");
     }
 
     const release: SiteRelease = { liveUrl, repoRevision: build.repoRevision };
     await ctx.progress(95, "Your site is live");
     const artifact = await ctx.addArtifact("siteRelease", "siteRelease", release);
-    return reviewCompletion("publishSite", artifact.id);
+    // Publish always means "completed" — the site is live.
+    return readyCompletion({ liveUrl: liveUrl ?? liveDashboardUrl, dashboardUrl: liveDashboardUrl });
   },
 };

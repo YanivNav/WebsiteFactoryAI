@@ -53,6 +53,14 @@ export class CodeGenerator {
     return { summary: reports.summary ?? summary, reports: reports.reports };
   }
 
+  /** Scoped change pass — uses refine-task.md instead of the full build prompt. */
+  async refine(ctx: WorkContext, input: CodeBuildInput): Promise<{ summary: string; reports: BuildReports }> {
+    await this.writeBrief(input);
+    const summary = await this.run(ctx, input.workspace, loadPrompt("refine-task"));
+    const reports = await this.readReport(input.workspace);
+    return { summary: reports.summary ?? summary, reports: reports.reports };
+  }
+
   /** One scoped repair pass over a failing build command. */
   async repair(
     ctx: WorkContext,
