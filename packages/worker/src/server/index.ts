@@ -20,6 +20,8 @@ export type WorkRevision = {
   contentArtifactId?: string;
   /** When true, revert the generated code to the fresh scaffold before rebuilding. */
   cleanRebuild?: boolean;
+  /** When set, restore the site's code to this git commit instead of generating. */
+  revertToCommit?: string;
 };
 
 export type ArtifactAsset = {

@@ -20,10 +20,13 @@ everything you build; read the more specific skills for each area on top of thes
    `cms-data` skill). A hardcoded array standing in for collection data is a bug.
 
 3. **Never reference config that nothing sets.** Do not read an env var, secret, or
-   `locals` value that isn't actually provided (e.g. a made-up `WIX_*_TRIGGER_ID`). If
-   your code needs an owner-supplied value, read it from a real, documented env var AND
-   raise a `reportManualTask` telling the owner to set it. Referencing an unset value is
-   a broken build, not a valid stub.
+   `locals` value that isn't actually provided (e.g. a made-up `WIX_*_TRIGGER_ID`).
+   If your code needs an owner-supplied value, read it from a project environment
+   variable AND declare it as a **`"kind": "setting"`** entry in the report's `content`
+   (with `label`, `help`, and `helpUrl`). The owner fills a labelled field in the app and
+   the factory writes it into the project environment. **Never instruct the owner to set
+   an environment variable, edit `.env`, or run a command** — they are a Wix
+   professional, not an engineer. Referencing an unset value is a broken build.
 
 4. **Write clean, readable, multi-line, indented code.** Never emit minified or
    single-line files. Reconstruct markup as well-formatted Astro/HTML.

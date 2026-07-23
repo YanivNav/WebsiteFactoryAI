@@ -1,4 +1,3 @@
-import { loadTemplateFiles, renderTemplate } from "../lib/templates";
 import type { WorkContext } from "../operations/context";
 import type { Workspace } from "../workspace";
 
@@ -123,24 +122,25 @@ export class WixService {
 
   /**
    * Self-managed: no CLI provisioning exists, so lay down a framework
-   * foundation wired to the Wix JavaScript SDK via an OAuth client id. The
-   * headless project and OAuth client are created by the user in the Wix
-   * dashboard (a pendingSetup step on the review task).
+   * project and OAuth client are created by the user in the Wix dashboard (a
+   * pendingSetup step on the review task).
    *
-   * The foundation comes from `templates/self-managed/` — self-managed works
-   * with any framework, so changing the framework means changing the template
-   * (or adding one), not this service.
+   * There is no template to lay down: the coding agent generates the project in
+   * the build stage, so this only marks the repository as a self-managed site.
    */
   async scaffoldSelfManaged(
     ctx: WorkContext,
     workspace: Workspace,
     businessName: string,
   ): Promise<void> {
-    ctx.log("info", `Scaffolding self-managed headless foundation: ${workspace.name}`);
-    const vars = { name: workspace.name, businessName };
-    for (const file of loadTemplateFiles("self-managed")) {
-      await workspace.writeFile(file.path, renderTemplate(file.content, vars));
-    }
+    ctx.log("info", `Preparing self-managed project: ${workspace.name}`);
+    await workspace.writeFile(
+      "README.md",
+      `# ${businessName}\n\nSelf-managed Wix Headless site. This repository holds the frontend and its ` +
+        `hosting; Wix provides business data and APIs through \`@wix/sdk\`. The site is generated ` +
+        `by the Website Factory build stage.\n`,
+    );
+    await workspace.writeFile(".gitignore", "node_modules/\ndist/\n.env\n.env.local\n");
   }
 
   private async readSiteId(workspace: Workspace): Promise<string | undefined> {
@@ -224,6 +224,43 @@ export class WixService {
         })),
       },
     });
+  }
+
+  /**
+   * Install the Wix skill docs into the project (`wix skills add`). They are not
+   * part of the scaffold — without this there is nothing for the code agent to
+   * read. Best-effort: a failure here shouldn't fail the build.
+   */
+  async ensureSkills(ctx: WorkContext, workspace: Workspace): Promise<void> {
+    const command = (await workspace.hasFile(".agents")) ? "update" : "add";
+    ctx.log("info", `Installing Wix skills into the project (wix skills ${command})`);
+    const result = await workspace.exec(
+      "npx",
+      ["--yes", "@wix/cli@latest", "skills", command],
+      { env: AGENT_ENV, stripPackageManagerEnv: true, timeoutMs: 5 * 60 * 1000 },
+    );
+    if (result.code !== 0) {
+      ctx.log("warn", `wix skills ${command} failed: ${tail(result.stderr || result.stdout, 300)}`);
+    }
+  }
+
+  /**
+   * Set a project environment variable the generated code reads. The owner
+   * supplies these as plain labelled fields in the app — they never touch env
+   * vars themselves; the factory puts the value where the code expects it.
+   */
+  async setEnv(ctx: WorkContext, workspace: Workspace, key: string, value: string): Promise<void> {
+    const result = await workspace.exec(
+      "npx",
+      ["--yes", "@wix/cli@latest", "env", "set", "--key", key, "--value", value],
+      { env: AGENT_ENV, stripPackageManagerEnv: true, timeoutMs: 3 * 60 * 1000 },
+    );
+    if (result.code !== 0) {
+      // Don't log the value — only the key.
+      ctx.log("warn", `Could not set ${key}: ${tail(result.stderr || result.stdout, 200)}`);
+      return;
+    }
+    ctx.log("info", `Set project setting ${key}`);
   }
 
   // ---- Preview & release (CLI, agent mode) -------------------------------
@@ -313,15 +350,36 @@ interface UrlCandidate {
   key?: string;
 }
 
+/**
+ * Trim punctuation the CLI wraps around URLs — a link printed as `(https://…)`
+ * or `see https://….` otherwise keeps the closing bracket/period and 404s.
+ * Closing brackets are only dropped when unbalanced, so real query strings that
+ * legitimately contain them survive.
+ */
+function cleanUrl(raw: string): string {
+  let url = raw.replace(/[.,;:!'"]+$/, "");
+  while (/[)\]}>]$/.test(url)) {
+    const close = url.at(-1)!;
+    const open = { ")": "(", "]": "[", "}": "{", ">": "<" }[close]!;
+    const balanced =
+      url.split(open).length - 1 >= url.split(close).length - 1;
+    if (balanced) break;
+    url = url.slice(0, -1).replace(/[.,;:!'"]+$/, "");
+  }
+  return url;
+}
+
 function collectUrls(events: AgentEvent[], output: string): UrlCandidate[] {
   const candidates: UrlCandidate[] = [];
+  const extract = (text: string): string[] =>
+    (text.match(/https?:\/\/[^\s"'<>]+/g) ?? []).map(cleanUrl);
   for (const event of events) {
     for (const [key, value] of Object.entries(event)) {
       if (typeof value !== "string") continue;
-      for (const url of value.match(/https?:\/\/[^\s"']+/g) ?? []) candidates.push({ url, key });
+      for (const url of extract(value)) candidates.push({ url, key });
     }
   }
-  for (const url of output.match(/https?:\/\/[^\s"']+/g) ?? []) candidates.push({ url });
+  for (const url of extract(output)) candidates.push({ url });
   return candidates;
 }
 

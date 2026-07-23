@@ -21,13 +21,14 @@ that is the wrong tool and requires app-developer setup you don't have.
 ## The template is an owner setup step
 
 A triggered email needs a **template the owner creates in the Wix dashboard**, which
-yields the `emailId`. You cannot create that template from code. So:
+yields the `emailId`. You cannot create that template from code.
 
-- Read the `emailId` from a real, documented env var (never a hardcoded or invented id,
-  never an unset `locals` value).
-- Raise exactly one `reportManualTask`: "Create the '<purpose>' triggered email in Wix
-  and set its ID as `<ENV_VAR>`", and list the exact variable names your code passes so
-  the owner's template matches them.
+Use **`helpLink`** to name a known dashboard destination (`triggeredEmails`, `home`) —
+the factory turns it into a real deep link for this site. Never write a dashboard URL
+yourself; a wrong link is worse than none.
+
+The owner fills that in as a normal labeled field in the app,
+and you should fill it in the emailId field of emailContact/emailMember.
 
 ## Rules
 

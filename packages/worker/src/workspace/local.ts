@@ -20,6 +20,24 @@ export function workspacesRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..", "workspaces");
 }
 
+/**
+ * Prepare the coding agent's global home — config that applies to every project
+ * we build (its global instructions), as opposed to a single checkout. Kept in
+ * this module so the filesystem stays behind the workspace layer.
+ *
+ * Factory-owned by default so we never clobber a developer's own `~/.codex`.
+ */
+export async function ensureAgentHome(files: Record<string, string>): Promise<string> {
+  const home = path.resolve(
+    process.env.FACTORY_CODEX_HOME ?? path.join(workspacesRoot(), "..", ".codex-home"),
+  );
+  await mkdir(home, { recursive: true });
+  for (const [name, content] of Object.entries(files)) {
+    await writeFile(path.join(home, name), content, "utf8");
+  }
+  return home;
+}
+
 export class LocalWorkspace implements Workspace {
   readonly root: string;
 

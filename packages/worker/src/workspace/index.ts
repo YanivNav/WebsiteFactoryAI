@@ -58,4 +58,4 @@ export interface Workspace {
   execInParent(command: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
 }
 
-export { LocalWorkspace, workspacesRoot } from "./local";
+export { LocalWorkspace, ensureAgentHome, workspacesRoot } from "./local";

@@ -35,7 +35,7 @@ function CompletedUserTaskView({ detail, task, viewedArtifactId, onViewArtifact 
       onView={onViewArtifact}
       proposedArtifactId={result.id}
       renderArtifact={(artifact) => (
-        <ArtifactContent artifact={artifact} subject={subject} versions={versions} />
+        <ArtifactContent artifact={artifact} subject={subject} versions={versions} detail={detail} />
       )}
       versionLabel="Versions"
       versions={versions}

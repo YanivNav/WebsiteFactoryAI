@@ -16,6 +16,7 @@ export type PromptName =
   | "screen-change"
   | "wix-setup"
   | "code"
+  | "build-task"
   | "fix"
   | "qa-repair"
   | "site-agents";

@@ -1,9 +1,11 @@
 import type { ManualTasks, SiteBuild, Specification, WebsiteContent } from "@factory/shared";
-import { CodeGenerator } from "../services/code-generator";
+import { CodeGenerator, type BuildReports } from "../services/code-generator";
 import { GitService } from "../services/git";
 import { resolveApp } from "../services/wix-apps";
+import { dashboardLink } from "../services/wix-dashboard-links";
 import { WixService } from "../services/wix";
 import { LocalWorkspace } from "../workspace";
+import type { WorkContext } from "./context";
 import { reviewCompletion, type WorkHandler } from "./types";
 
 let git: GitService;
@@ -102,34 +104,56 @@ export const buildSite: WorkHandler<"buildSite"> = {
       });
     }
 
-    // 2. Build the site (the agent creates collections, seeds data, imports media,
-    //    writes pages/workflows/backend, and builds as it goes).
-    await ctx.progress(30, "Building your pages and features");
-    // The design stage produced real HTML per screen; hand the agent a way to
-    // read it so it adapts real markup instead of guessing from a text prompt.
-    const designAssets = new Map(designArtifact.assets.map((a) => [a.id, a]));
-    const designHtmlUrls: Record<string, string> = {};
-    for (const screen of designArtifact.data.screens) {
-      const url = designAssets.get(screen.htmlAssetId)?.url;
-      if (url) designHtmlUrls[screen.path] = url;
-    }
-    const { summary, reports } = await code.build(ctx, {
-      workspace,
-      wix,
-      siteId,
-      spec,
-      design: designArtifact.data,
-      designHtmlUrls,
-      content: bakedContent,
-      feedback: revision?.feedback,
-    });
+    // 2. Make sure the Wix skill docs exist in the project — the code agent reads
+    //    them for correct SDK usage, and they are not part of the scaffold.
+    await ctx.progress(25, "Loading the Wix building guides");
+    await wix.ensureSkills(ctx, workspace);
 
-    // 3. Authoritative build check + one repair pass.
+    // Apply owner-supplied settings (e.g. a triggered-email id) into the project
+    // environment before building, so the code can rely on them. The owner fills
+    // a labelled field in the app; they never touch environment variables.
+    for (const item of bakedContent?.items ?? []) {
+      if (item.kind === "setting" && item.value) {
+        await wix.setEnv(ctx, workspace, item.key, item.value);
+      }
+    }
+
+    // 3. Produce the site's code — either restore an earlier version from git,
+    //    or run the coding agent (which works directly in the project, with the
+    //    brief and approved designs handed to it as files).
+    let summary: string;
+    let reports: BuildReports;
+    if (revision?.revertToCommit) {
+      await ctx.progress(40, "Restoring the earlier version of your site");
+      await git.resetToCommit(workspace, revision.revertToCommit);
+      summary = `Restored the site to an earlier version (${revision.revertToCommit.slice(0, 7)}).`;
+      reports = { questions: [], manualTasks: [], content: [], unitsBuilt: [] };
+    } else {
+      await ctx.progress(30, "Building your pages and features");
+      const designAssets = new Map(designArtifact.assets.map((a) => [a.id, a]));
+      const designHtmlUrls: Record<string, string> = {};
+      for (const screen of designArtifact.data.screens) {
+        const url = designAssets.get(screen.htmlAssetId)?.url;
+        if (url) designHtmlUrls[screen.path] = url;
+      }
+      const built = await code.build(ctx, {
+        workspace,
+        spec,
+        design: designArtifact.data,
+        designHtmlUrls,
+        content: bakedContent,
+        feedback: revision?.feedback,
+      });
+      summary = built.summary;
+      reports = built.reports;
+    }
+
+    // 4. Authoritative build check + one repair pass.
     await ctx.progress(72, "Checking your site builds");
     let buildOk = await runBuild(workspace);
-    if (!buildOk.ok) {
+    if (!buildOk.ok && !revision?.revertToCommit) {
       await ctx.progress(76, "Fixing a build issue");
-      await code.repair(ctx, { workspace, wix, siteId, summary, failure: buildOk.failure }, reports);
+      await code.repair(ctx, { workspace, summary, failure: buildOk.failure }, reports);
       buildOk = await runBuild(workspace);
     }
     if (!buildOk.ok) {
@@ -142,9 +166,19 @@ export const buildSite: WorkHandler<"buildSite"> = {
       });
     }
 
+    // Formatting is not the model's job — models minify to save tokens no matter
+    // what the prompt says. Run a real formatter over the generated source.
+    await ctx.progress(80, "Tidying up the code");
+    await formatSource(ctx, workspace);
+
     // 4. Merge the content manifest: the slots the agent declared this run, keeping
     //    any values the owner already provided (by key), plus carried-forward slots.
     const content = mergeContent(bakedContent, reports.content);
+    // Resolve any named dashboard destination to a real, verified URL. The agent
+    // names a destination; it never invents the link itself.
+    for (const item of content.items) {
+      item.helpUrl = dashboardLink(item.helpLink, siteId) ?? item.helpUrl;
+    }
 
     // 5. Collect the build's questions + manual tasks.
     for (const q of reports.questions) {
@@ -170,11 +204,13 @@ export const buildSite: WorkHandler<"buildSite"> = {
 
     // 7. Back up the code.
     await ctx.progress(90, "Saving your site");
-    const commitMessage = revision?.cleanRebuild
-      ? "Rebuild site from scratch"
-      : revision?.feedback
-        ? `Refine: ${revision.feedback}`
-        : "Build site";
+    const commitMessage = revision?.revertToCommit
+      ? `Restore site to ${revision.revertToCommit.slice(0, 7)}`
+      : revision?.cleanRebuild
+        ? "Rebuild site from scratch"
+        : revision?.feedback
+          ? `Refine: ${revision.feedback}`
+          : "Build site";
     await git.commitAndPush(workspace, repo, commitMessage);
     const repoRevision = (await workspace.exec("git", ["rev-parse", "HEAD"])).stdout.trim();
 
@@ -200,6 +236,29 @@ export const buildSite: WorkHandler<"buildSite"> = {
     return reviewCompletion("buildSite", buildArtifact.id);
   },
 };
+
+/**
+ * Format the generated source with Prettier (plus the Astro plugin). Best-effort:
+ * a formatting failure must not fail the build.
+ */
+async function formatSource(ctx: WorkContext, workspace: LocalWorkspace): Promise<void> {
+  const result = await workspace.exec(
+    "npx",
+    [
+      "--yes",
+      "--package=prettier@3",
+      "--package=prettier-plugin-astro",
+      "prettier",
+      "--write",
+      "--plugin=prettier-plugin-astro",
+      "src/**/*.{astro,ts,tsx,js,jsx,css,json}",
+    ],
+    { stripPackageManagerEnv: true, timeoutMs: 5 * 60 * 1000 },
+  );
+  if (result.code !== 0) {
+    ctx.log("warn", `Formatting skipped: ${(result.stderr || result.stdout).slice(-300)}`);
+  }
+}
 
 /** Business-solution names the spec needs installed: CMS, Stores, and each `others`. */
 function requiredSolutions(spec: Specification): string[] {

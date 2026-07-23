@@ -481,9 +481,20 @@ export const WebsiteContentSchema = z.object({
     z.object({
       key: z.string().describe("Stable slot id the generated code reads, e.g. 'home.hero.title'"),
       label: z.string().describe("Human label shown in the content form"),
-      kind: z.enum(["text", "longtext", "image", "logo"]),
+      /**
+       * `setting` is a value the site needs to work (e.g. a Wix triggered-email
+       * id) rather than page content. The owner just fills the field — the
+       * factory puts it where the code reads it. Never ask them to edit env vars.
+       */
+      kind: z.enum(["text", "longtext", "image", "logo", "setting"]),
       page: z.string().optional().describe("Page path this content belongs to, for grouping"),
       placeholder: z.string().optional().describe("Placeholder value used until the owner provides one"),
+      help: z.string().optional().describe("Plain-language instructions for how to get this value"),
+      helpLink: z
+        .string()
+        .optional()
+        .describe("Name of a known Wix dashboard destination; the factory resolves it to a real URL"),
+      helpUrl: z.string().optional().describe("A real link to where the owner gets it"),
       value: z.string().nullable().describe("The owner's value; null means unfilled (use placeholder)"),
       assetId: z.string().optional().describe("Convex storage id of an uploaded image/logo"),
     }),

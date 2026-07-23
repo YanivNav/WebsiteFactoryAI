@@ -83,7 +83,17 @@ export class GitService {
     const roots = await workspace.execOrThrow("git", ["rev-list", "--max-parents=0", "HEAD"]);
     const scaffold = roots.stdout.trim().split("\n").filter(Boolean).at(-1);
     if (!scaffold) throw new Error("Could not find the scaffold commit to reset to");
-    await workspace.execOrThrow("git", ["read-tree", "--reset", "-u", scaffold]);
+    await this.resetToCommit(workspace, scaffold);
+  }
+
+  /**
+   * Restore the working tree to an earlier commit's contents while leaving HEAD
+   * and history untouched — the change is then committed forward, so reverting
+   * is an ordinary commit that still fast-forwards (never a force-push, and the
+   * reverted-from version stays in history).
+   */
+  async resetToCommit(workspace: Workspace, commit: string): Promise<void> {
+    await workspace.execOrThrow("git", ["read-tree", "--reset", "-u", commit]);
     await workspace.execOrThrow("git", ["clean", "-fd"]);
   }
 

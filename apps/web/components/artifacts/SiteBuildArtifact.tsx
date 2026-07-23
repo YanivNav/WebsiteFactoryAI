@@ -27,6 +27,9 @@ export function SiteBuildArtifact({
   const build = artifact.data;
   const { applyContent, busy } = useUserTask();
   const rebuildSiteClean = useMutation(api.projects.rebuildSiteClean);
+  const revertSiteTo = useMutation(api.projects.revertSiteTo);
+  // Git holds the site's version history: an older build can be restored.
+  const isLatest = detail?.artifacts.siteBuild[0]?.id === artifact.id;
 
   const content = detail?.artifacts.websiteContent.find((a) => a.id === build.contentArtifactId);
   const manual = detail?.artifacts.manualTasks.find((a) => a.id === build.manualTasksArtifactId);
@@ -60,7 +63,7 @@ export function SiteBuildArtifact({
           </p>
         )}
         {detail && (
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-4">
             <ConfirmAction
               label="Rebuild code from scratch"
               message="Replaces the current generated code (kept in git history). Content, Wix site, and design stay."
@@ -68,6 +71,20 @@ export function SiteBuildArtifact({
               className="text-ink-muted hover:text-ink text-xs underline"
               onConfirm={rebuild}
             />
+            {!isLatest && (
+              <ConfirmAction
+                label="Restore this version"
+                message="Brings the site's code back to this version. Newer versions stay in history."
+                confirmLabel="Restore"
+                className="text-ink-muted hover:text-ink text-xs underline"
+                onConfirm={() =>
+                  void revertSiteTo({
+                    projectId: detail.project._id as Id<"projects">,
+                    buildArtifactId: artifact.id as Id<"artifacts">,
+                  })
+                }
+              />
+            )}
           </div>
         )}
       </section>

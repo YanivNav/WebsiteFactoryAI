@@ -4,18 +4,12 @@ import { useCallback, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import type { WebsiteContent } from "@factory/shared";
 
 type TaskAction = "complete" | "revise" | "revisit" | "delete" | "applyContent";
 
-export interface ContentItemInput {
-  key: string;
-  label: string;
-  kind: "text" | "longtext" | "image" | "logo";
-  page?: string;
-  placeholder?: string;
-  value: string | null;
-  assetId?: string;
-}
+/** One editable content slot — derived from the shared schema so it can't drift. */
+export type ContentItemInput = WebsiteContent["items"][number];
 
 export function useUserTask() {
   const completeMutation = useMutation(api.projects.completeUserTask);

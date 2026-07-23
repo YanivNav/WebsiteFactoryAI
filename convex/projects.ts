@@ -208,9 +208,18 @@ export const generateContentUploadUrl = mutation({
 const contentItemValidator = v.object({
   key: v.string(),
   label: v.string(),
-  kind: v.union(v.literal("text"), v.literal("longtext"), v.literal("image"), v.literal("logo")),
+  kind: v.union(
+    v.literal("text"),
+    v.literal("longtext"),
+    v.literal("image"),
+    v.literal("logo"),
+    v.literal("setting"),
+  ),
   page: v.optional(v.string()),
   placeholder: v.optional(v.string()),
+  help: v.optional(v.string()),
+  helpLink: v.optional(v.string()),
+  helpUrl: v.optional(v.string()),
   value: v.union(v.string(), v.null()),
   assetId: v.optional(v.string()),
 });
@@ -337,6 +346,40 @@ export const rebuildSiteClean = mutation({
         instruction: {
           ...draft.instruction,
           revision: { mode: "regenerate", baseArtifactId: latestBuild._id, cleanRebuild: true },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Restore the site to an earlier build. Git holds the site's real version
+ * history, so this replays that build's commit into the working tree and
+ * commits it forward — the version you reverted from stays in history.
+ */
+export const revertSiteTo = mutation({
+  args: { projectId: v.id("projects"), buildArtifactId: v.id("artifacts") },
+  handler: async (ctx, { projectId, buildArtifactId }) => {
+    const project = await requireProject(ctx, projectId);
+    const build = await ctx.db.get(buildArtifactId);
+    if (!build || build.projectId !== projectId || build.type !== "siteBuild") {
+      throw new Error("That version is not available");
+    }
+    const commit = (build.data as { repoRevision?: string }).repoRevision;
+    if (!commit) throw new Error("That version has no saved code revision");
+
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      project._id,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "regenerate", baseArtifactId: build._id, revertToCommit: commit },
         },
       },
       "queued",

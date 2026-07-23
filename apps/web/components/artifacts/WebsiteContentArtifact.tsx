@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Artifact, WebsiteContent } from "@factory/shared";
-import { ImageUp, Loader2 } from "lucide-react";
+import { ExternalLink, ImageUp, Loader2 } from "lucide-react";
 import type { ContentItemInput } from "@/data/useUserTask";
 
 const FIELD =
@@ -40,7 +40,9 @@ export function WebsiteContentForm({
     );
   }
 
-  const byPage = groupBy(draft, (item) => item.page ?? "Site");
+  const settings = draft.filter((item) => item.kind === "setting");
+  const content = draft.filter((item) => item.kind !== "setting");
+  const byPage = groupBy(content, (item) => item.page ?? "Site");
 
   return (
     <section className="border-outline rounded border bg-white p-4">
@@ -61,6 +63,18 @@ export function WebsiteContentForm({
             </div>
           </div>
         ))}
+        {settings.length > 0 && (
+          <div>
+            <p className="text-ink-muted mb-2 text-[11px] font-semibold uppercase tracking-[0.08em]">
+              Details your site needs
+            </p>
+            <div className="flex flex-col gap-3">
+              {settings.map((item) => (
+                <ContentField key={item.key} item={item} onChange={(patch) => setValue(item.key, patch)} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="mt-4 flex justify-end">
         <button
@@ -89,6 +103,17 @@ function ContentField({
   return (
     <label className="block">
       <span className="text-ink text-xs font-medium">{item.label}</span>
+      {item.help && <span className="text-ink-muted mt-0.5 block text-xs">{item.help}</span>}
+      {item.helpUrl && (
+        <a
+          className="text-primary mt-0.5 flex w-fit items-center gap-1 text-xs underline hover:no-underline"
+          href={item.helpUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Where do I find this? <ExternalLink size={11} />
+        </a>
+      )}
       {item.kind === "longtext" ? (
         <textarea
           className={`${FIELD} mt-1`}

@@ -30,3 +30,6 @@ workspaces/*
 
 /.idea/
 /design/
+
+# the coding agent's factory-owned global home (generated from the skills)
+/.codex-home/

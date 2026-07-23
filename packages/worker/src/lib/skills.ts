@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadPrompt } from "./prompts";
 
 // packages/worker/src/lib → packages/prompts/skills
 const SKILLS_DIR = path.resolve(
@@ -42,6 +43,21 @@ export function loadFactorySkills(): FactorySkill[] {
 
 export function loadFactorySkill(name: string): FactorySkill | undefined {
   return loadFactorySkills().find((skill) => skill.name === name);
+}
+
+/**
+ * The document installed as the coding agent's GLOBAL `AGENTS.md` (in the
+ * factory-owned CODEX_HOME): the operating rules plus every factory skill.
+ *
+ * Global means one copy for every project we build — edit a skill here and the
+ * next build of every site picks it up. Wix's own per-project skills sit closer
+ * to the work, so they layer on top of these.
+ */
+export function buildGlobalAgentsDoc(): string {
+  const sections = loadFactorySkills().map(
+    (skill) => `<!-- skill: ${skill.name} — ${skill.description} -->\n\n${skill.body}`,
+  );
+  return [loadPrompt("code"), ...sections].join("\n\n---\n\n") + "\n";
 }
 
 /** Minimal `--- key: value ---` frontmatter parser (no YAML dependency). */

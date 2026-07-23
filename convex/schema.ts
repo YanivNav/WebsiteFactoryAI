@@ -20,6 +20,9 @@ export const revisionValidator = v.object({
   // When true, a site-build reverts the generated code to the fresh scaffold
   // before rebuilding — a clean regeneration in the same project.
   cleanRebuild: v.optional(v.boolean()),
+  // When set, restore the site's code to this git commit instead of generating
+  // (git is the source of truth for site versions).
+  revertToCommit: v.optional(v.string()),
 });
 
 export const userTaskResultValidator = v.union(
