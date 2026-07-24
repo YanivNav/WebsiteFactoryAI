@@ -265,8 +265,13 @@ export class WixService {
 
   // ---- Preview & release (CLI, agent mode) -------------------------------
 
+  // Note: these return only the SITE url (the preview/published/dev site the CLI
+  // prints). The dashboard URL is never scraped from CLI output — it is derived
+  // from the provisioned site id by `wixDashboardUrl` in `@factory/shared`, so it
+  // is always a real, site-scoped link instead of a truncated/guessed one.
+
   /** `wix preview` → a shareable preview URL for the built site. */
-  async preview(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string; dashboardUrl?: string }> {
+  async preview(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string }> {
     ctx.log("info", "Creating a Wix preview");
     const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "preview"], {
       env: AGENT_ENV,
@@ -274,11 +279,11 @@ export class WixService {
       timeoutMs: SCAFFOLD_TIMEOUT_MS,
     });
     const events = parseAgentEvents(result.stdout);
-    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "preview"), dashboardUrl: pickDashboardUrl(events, result.stdout) };
+    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "preview") };
   }
 
   /** `wix release` → publishes and returns the live URL. */
-  async release(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string; dashboardUrl?: string }> {
+  async release(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string }> {
     ctx.log("info", "Publishing the site with Wix");
     const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "release"], {
       env: AGENT_ENV,
@@ -289,23 +294,11 @@ export class WixService {
       throw new Error(`Wix release failed: ${agentError(parseAgentEvents(result.stdout)) ?? tail(result.stderr || result.stdout)}`);
     }
     const events = parseAgentEvents(result.stdout);
-    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "published"), dashboardUrl: pickDashboardUrl(events, result.stdout) };
+    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "published") };
   }
 
-  /** `wix dev` → starts a local dev server and returns the localhost URL. */
-  async dev(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string; dashboardUrl?: string }> {
-    ctx.log("info", "Starting Wix dev server");
-    const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "dev"], {
-      env: AGENT_ENV,
-      stripPackageManagerEnv: true,
-      timeoutMs: SCAFFOLD_TIMEOUT_MS,
-    });
-    if (result.code !== 0) {
-      throw new Error(`Wix dev failed: ${agentError(parseAgentEvents(result.stdout)) ?? tail(result.stderr || result.stdout)}`);
-    }
-    const events = parseAgentEvents(result.stdout);
-    return { siteUrl: pickSiteUrl(ctx, events, result.stdout, "dev"), dashboardUrl: pickDashboardUrl(events, result.stdout) };
-  }
+  // The dev server is long-lived, so it isn't run here — see `DevServerManager`,
+  // which spawns it as a background process and streams its logs live.
 
   private async rest<T = unknown>(
     method: "GET" | "POST",
@@ -358,12 +351,9 @@ function agentError(events: AgentEvent[]): string | undefined {
   return typeof detail === "string" ? detail : failure.event;
 }
 
-// URLs the CLI prints that are never the site itself: the dashboard, docs, and
-// account/marketing pages. The dashboard lives at manage.wix.com/dashboard.
+// URLs the CLI prints that are never the site itself: dashboards, docs, and
+// account/marketing pages.
 const NON_SITE_URL = /manage\.wix\.com|\/dashboard|dev\.wix\.com|support\.wix|www\.wix\.com|wix\.com\/app-market/i;
-
-// Dashboard URLs contain manage.wix.com/dashboard — the inverse of NON_SITE_URL.
-const DASHBOARD_URL = /manage\.wix\.com\/dashboard/i;
 
 interface UrlCandidate {
   url: string;
@@ -414,7 +404,7 @@ function pickSiteUrl(
   ctx: WorkContext,
   events: AgentEvent[],
   output: string,
-  intent: "preview" | "published",
+  intent: "preview" | "published" | "dev",
 ): string | undefined {
   const candidates = collectUrls(events, output).filter((c) => !NON_SITE_URL.test(c.url));
   if (candidates.length === 0) {
@@ -435,13 +425,6 @@ function pickSiteUrl(
     `Wix ${intent} URL candidates: ${[...new Set(ranked.map((c) => c.url))].slice(0, 6).join(" | ")}`,
   );
   return ranked[0]?.url;
-}
-
-function pickDashboardUrl(events: AgentEvent[], output: string): string | undefined {
-  const candidates = collectUrls(events, output).filter((c) => DASHBOARD_URL.test(c.url));
-  // Pick the shortest dashboard URL — usually the cleanest home link.
-  candidates.sort((a, b) => a.url.length - b.url.length);
-  return candidates[0]?.url;
 }
 
 function tail(text: string, chars = 800): string {

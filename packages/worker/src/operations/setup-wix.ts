@@ -1,4 +1,4 @@
-import type { WixProject } from "@factory/shared";
+import { type WixProject, wixDashboardUrl } from "@factory/shared";
 import { GitService } from "../services/git";
 import { WixService } from "../services/wix";
 import { LocalWorkspace } from "../workspace";
@@ -68,10 +68,9 @@ export const setupWix: WorkHandler<"setupWix"> = {
       },
       wix: {
         siteId,
-        // Site-scoped dashboard URL, derived from the real site id only.
-        dashboardUrl: siteId ? `https://manage.wix.com/dashboard/${siteId}/home` : undefined,
-        // liveUrl is intentionally not set here — the site goes live in a later
-        // stage (release), after the real site is built. No live URL exists yet.
+        // A real, site-scoped dashboard link, derived from the metasite id the
+        // scaffold provisioned — not scraped from CLI output, not fabricated.
+        dashboardUrl: wixDashboardUrl(siteId),
       },
       pendingSetup:
         hosting === "selfManaged"

@@ -1,4 +1,4 @@
-import type { SiteRelease } from "@factory/shared";
+import { type SiteRelease, wixDashboardUrl } from "@factory/shared";
 import { GitService } from "../services/git";
 import { WixService } from "../services/wix";
 import { LocalWorkspace } from "../workspace";
@@ -16,6 +16,7 @@ export const publishSite: WorkHandler<"publishSite"> = {
     ]);
     const build = buildArtifact.data;
     const { folderName } = projectArtifact.data;
+    const siteId = projectArtifact.data.wix.siteId;
 
     git ??= new GitService();
     wix ??= new WixService();
@@ -30,11 +31,12 @@ export const publishSite: WorkHandler<"publishSite"> = {
     }
 
     await ctx.progress(40, "Publishing your site");
-    const { siteUrl: liveUrl, dashboardUrl: liveDashboardUrl } = await wix.release(ctx, workspace);
-    // The site is published regardless of whether we scraped the URL. Show
-    // whatever we could get; the dashboard link is always better than nothing.
-    if (!liveUrl && !liveDashboardUrl) {
-      ctx.log("warn", "Published, but neither a site URL nor a dashboard URL was found");
+    const { siteUrl: liveUrl } = await wix.release(ctx, workspace);
+    // The dashboard link is derived from the real site id, not scraped from CLI
+    // output, so it's a reliable landing spot even if no live URL was reported.
+    const liveDashboardUrl = wixDashboardUrl(siteId);
+    if (!liveUrl) {
+      ctx.log("warn", "Published, but no live site URL was found in the CLI output");
     }
 
     const release: SiteRelease = { liveUrl, repoRevision: build.repoRevision };
