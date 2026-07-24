@@ -493,7 +493,7 @@ export const WebsiteContentSchema = z.object({
       helpLink: z
         .string()
         .optional()
-        .describe("Name of a known Wix dashboard destination; the factory resolves it to a real URL"),
+        .describe("A relative Wix dashboard path (e.g. 'automations'); the factory scopes it to the real site id. Never a full URL."),
       helpUrl: z.string().optional().describe("A real link to where the owner gets it"),
       value: z.string().nullable().describe("The owner's value; null means unfilled (use placeholder)"),
       assetId: z.string().optional().describe("Convex storage id of an uploaded image/logo"),
@@ -505,8 +505,8 @@ export type WebsiteContent = z.infer<typeof WebsiteContentSchema>;
 /**
  * Things the build raised for the owner: questions that arose beyond the
  * questions phase, and genuinely-manual setup the factory could not automate
- * (payments, Premium, domain). `dashboardUrl` is derived from a real site id
- * only — never fabricated.
+ * (payments, Premium, domain). `dashboardUrl` is composed by the factory from
+ * the real site id (`wixDashboardUrl`) — never scraped or fabricated.
  */
 export const ManualTasksSchema = z.object({
   items: z.array(
@@ -516,6 +516,25 @@ export const ManualTasksSchema = z.object({
       title: z.string(),
       detail: z.string(),
       dashboardUrl: z.string().optional(),
+      /**
+       * Proof this genuinely cannot be done programmatically — the validation
+       * error, documented restriction, or API error actually hit. A manual task
+       * without evidence is a task the agent gave up on too early, so this is
+       * what keeps the bar high.
+       */
+      evidence: z.string().optional(),
+      /**
+       * Present when the factory can attempt this step itself in a browser.
+       * `plan` is stated specifically so the owner can consent to a real action
+       * on their Wix account; `verification` is how the result gets confirmed
+       * through the API afterwards (a browser run reporting "done" is not proof).
+       */
+      assist: z
+        .object({
+          plan: z.string(),
+          verification: z.string(),
+        })
+        .optional(),
       status: z.enum(["open", "done"]),
     }),
   ),
@@ -529,6 +548,10 @@ export const SiteBuildSchema = z.object({
   builtAt: z.number().optional().describe("Unix-ms timestamp when the build completed"),
   previewUrl: z.string().optional().describe("Shareable Wix preview URL for this build"),
   dashboardUrl: z.string().optional().describe("Wix dashboard URL for the site"),
+  commits: z
+    .array(z.object({ sha: z.string(), message: z.string(), date: z.string() }))
+    .optional()
+    .describe("Recent git commits from this build's repo history"),
   contentArtifactId: z.string().optional().describe("The websiteContent version this build baked in"),
   manualTasksArtifactId: z.string().optional().describe("The manualTasks version this build raised"),
   installedApps: z.array(z.string()).describe("Business-solution app ids installed for this site"),
