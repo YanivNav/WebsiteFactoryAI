@@ -1,8 +1,8 @@
-import type { ManualTasks, SiteBuild, Specification, WebsiteContent } from "@factory/shared";
+import { type ManualTasks, type SiteBuild, type Specification, type WebsiteContent, wixDashboardUrl } from "@factory/shared";
 import { CodeGenerator, type BuildReports } from "../services/code-generator";
+import { getDevServerManager } from "../services/dev-server";
 import { GitService } from "../services/git";
 import { resolveApp } from "../services/wix-apps";
-import { dashboardLink } from "../services/wix-dashboard-links";
 import { WixService } from "../services/wix";
 import { LocalWorkspace } from "../workspace";
 import type { WorkContext } from "./context";
@@ -29,19 +29,27 @@ export const buildSite: WorkHandler<"buildSite"> = {
     git ??= new GitService();
     wix ??= new WixService();
 
-    // Dev-only: just start the dev server and return the localhost URL.
-    if ((revision as Record<string, unknown> | undefined)?.["devOnly"]) {
+    // Stop-dev: a fast trigger that kills the project's running dev server.
+    if (revision?.stopDev) {
+      await ctx.progress(50, "Stopping the dev server");
+      await getDevServerManager().stop(ctx.work.projectId, ctx.workerId);
+      return readyCompletion();
+    }
+
+    // Dev-only: a fast trigger that starts the dev server as a long-lived
+    // background process. It returns as soon as the URL is up (or a bound is
+    // hit); the server keeps running and streams its logs to the dev session.
+    if (revision?.devOnly) {
       const devWorkspace = new LocalWorkspace(project.folderName);
       const repo = await git.ensureRepo(project.folderName);
       if (!(await devWorkspace.exists())) await git.restore(devWorkspace, repo);
       await ctx.progress(30, "Starting the dev server");
-      const { siteUrl: devUrl, dashboardUrl: devDashboardUrl } = await wix.dev(ctx, devWorkspace);
-      if (!devUrl) ctx.log("warn", "Dev server started but no URL was found");
-      return readyCompletion({ devUrl: devUrl ?? undefined, dashboardUrl: devDashboardUrl });
+      await getDevServerManager().start(ctx.work.projectId, ctx.workerId, devWorkspace);
+      return readyCompletion();
     }
 
     // Preview-only: build and generate a fresh preview URL.
-    if ((revision as Record<string, unknown> | undefined)?.["previewOnly"]) {
+    if (revision?.previewOnly) {
       const prevWorkspace = new LocalWorkspace(project.folderName);
       const repo = await git.ensureRepo(project.folderName);
       if (!(await prevWorkspace.exists())) await git.restore(prevWorkspace, repo);
@@ -49,8 +57,8 @@ export const buildSite: WorkHandler<"buildSite"> = {
       const buildResult = await runBuild(prevWorkspace);
       if (buildResult.ok) {
         await ctx.progress(60, "Creating a fresh preview");
-        const { siteUrl: previewUrl, dashboardUrl: previewDashboardUrl } = await wix.preview(ctx, prevWorkspace);
-        return readyCompletion({ previewUrl, dashboardUrl: previewDashboardUrl });
+        const { siteUrl: previewUrl } = await wix.preview(ctx, prevWorkspace);
+        return readyCompletion({ previewUrl, previewDashboardUrl: wixDashboardUrl(project.wix.siteId) });
       }
       ctx.log("warn", `Preview build failed: ${buildResult.failure.stderr.slice(-500)}`);
       return readyCompletion();
@@ -98,7 +106,7 @@ export const buildSite: WorkHandler<"buildSite"> = {
     if (siteId) {
       await ctx.progress(12, "Setting up your Wix business features");
       for (const name of requiredSolutions(spec)) {
-        const resolved = resolveApp(name);
+        const resolved = await resolveApp(name, workspace);
         if (resolved.kind === "app") {
           try {
             await wix.installApp(siteId, resolved.appDefId);
@@ -109,7 +117,7 @@ export const buildSite: WorkHandler<"buildSite"> = {
               kind: "manualTask",
               title: `Add the ${name} feature in Wix`,
               detail: `I couldn't add "${name}" automatically (${error instanceof Error ? error.message : "unknown error"}). You can add it from your Wix dashboard.`,
-              dashboardUrl: `https://manage.wix.com/dashboard/${siteId}/app-market`,
+              dashboardUrl: wixDashboardUrl(siteId),
               status: "open",
             });
           }
@@ -174,13 +182,31 @@ export const buildSite: WorkHandler<"buildSite"> = {
         designHtmlUrls,
         content: bakedContent,
         feedback: revision?.feedback,
+        siteId,
       });
       summary = built.summary;
       reports = built.reports;
     }
 
     // 4. Authoritative build check + one repair pass.
-    await ctx.progress(72, "Checking your site builds");
+    //    First, scan for forbidden host-module imports — the agent sometimes
+    //    writes @wix/site-* code despite the skill instructions.
+    await ctx.progress(70, "Checking for unsupported imports");
+    const forbiddenImports = await findHostModuleImports(workspace);
+    if (forbiddenImports.length > 0) {
+      await ctx.progress(72, "Removing unsupported Wix packages");
+      await code.repair(ctx, {
+        workspace,
+        summary,
+        failure: {
+          command: "host-module check",
+          stdout: "",
+          stderr: `These files import @wix/site-* host modules, which cannot work in Headless. Replace them with REST API calls or Wix Automations:\n\n${forbiddenImports.join("\n")}\n\nNever import @wix/site-* packages. Use the REST API instead.`,
+        },
+      }, reports);
+    }
+
+    await ctx.progress(74, "Checking your site builds");
     let buildOk = await runBuild(workspace);
     if (!buildOk.ok && !revision?.revertToCommit) {
       await ctx.progress(76, "Fixing a build issue");
@@ -205,10 +231,11 @@ export const buildSite: WorkHandler<"buildSite"> = {
     // 4. Merge the content manifest: the slots the agent declared this run, keeping
     //    any values the owner already provided (by key), plus carried-forward slots.
     const content = mergeContent(bakedContent, reports.content);
-    // Resolve any named dashboard destination to a real, verified URL. The agent
-    // names a destination; it never invents the link itself.
+    // Compose any dashboard help link from the real site id + the relative path
+    // the agent reported. The agent supplies only the path; it never invents the
+    // full link, so this can never 404 onto some other site.
     for (const item of content.items) {
-      item.helpUrl = dashboardLink(item.helpLink, siteId) ?? item.helpUrl;
+      item.helpUrl = wixDashboardUrl(siteId, item.helpLink) ?? item.helpUrl;
     }
 
     // 5. Collect the build's questions + manual tasks.
@@ -221,7 +248,11 @@ export const buildSite: WorkHandler<"buildSite"> = {
         kind: "manualTask",
         title: m.title,
         detail: m.detail,
-        dashboardUrl: m.dashboardUrl,
+        // The agent reports a relative dashboard path (never a full URL); the
+        // factory scopes it to the real site so the link always lands correctly.
+        dashboardUrl: wixDashboardUrl(siteId, m.dashboardPath),
+        evidence: m.evidence,
+        assist: m.assist,
         status: "open",
       });
     }
@@ -233,8 +264,10 @@ export const buildSite: WorkHandler<"buildSite"> = {
       await ctx.progress(84, "Creating a preview you can see");
       const preview = await wix.preview(ctx, workspace);
       previewUrl = preview.siteUrl;
-      dashboardUrl = preview.dashboardUrl;
     }
+    // The dashboard link is derived from the real site id, not scraped — so it's
+    // available whether or not the preview build produced a site URL.
+    dashboardUrl = wixDashboardUrl(siteId);
 
     // 7. Back up the code.
     await ctx.progress(90, "Saving your site");
@@ -247,6 +280,17 @@ export const buildSite: WorkHandler<"buildSite"> = {
           : "Build site";
     await git.commitAndPush(workspace, repo, commitMessage);
     const repoRevision = (await workspace.exec("git", ["rev-parse", "HEAD"])).stdout.trim();
+    // Store recent git history so the control panel can show it.
+    const gitLogOutput = (await workspace.exec("git", [
+      "log", "--format=%H%x00%s%x00%aI", "-n", "20",
+    ])).stdout.trim();
+    const commits = gitLogOutput
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [sha, message, date] = line.split("\0");
+        return { sha: sha!, message: message ?? "", date: date ?? "" };
+      });
 
     // 8. Emit content + manual-task artifacts, then the build (referencing them).
     //    In revise mode, content and manual-task artifacts are new versions;
@@ -265,21 +309,26 @@ export const buildSite: WorkHandler<"buildSite"> = {
       builtAt: Date.now(),
       previewUrl,
       dashboardUrl,
+      commits,
       contentArtifactId: contentArtifact.id,
       manualTasksArtifactId: manualArtifact.id,
       installedApps,
       unitsBuilt: reports.unitsBuilt,
     };
     await ctx.progress(96, "Finishing up");
+    let buildArtifactId: string;
     if (isRevise && previousBuild) {
-      await ctx.updateArtifact(previousBuild.id, "siteBuild", build);
+      const updated = await ctx.updateArtifact(previousBuild.id, "siteBuild", build);
+      buildArtifactId = updated.id;
     } else {
-      await ctx.addArtifact("siteBuild", "siteBuild", build, previousBuild?.id);
+      const newArtifact = await ctx.addArtifact("siteBuild", "siteBuild", build, previousBuild?.id);
+      buildArtifactId = newArtifact.id;
     }
     // Initial build gets a review task (user can revise or approve → ready).
-    // Scoped changes from the control panel go straight back to ready.
-    if (revision && revision.mode !== "initial") return readyCompletion();
-    return reviewCompletion("buildSite", buildArtifact.id);
+    // Scoped changes from the control panel go straight back to ready with
+    // the preview URLs written to project.wix.
+    if (revision && revision.mode !== "initial") return readyCompletion({ previewUrl, previewDashboardUrl: dashboardUrl });
+    return reviewCompletion("buildSite", buildArtifactId);
   },
 };
 
@@ -337,11 +386,14 @@ function mergeContent(
   baked: WebsiteContent | undefined,
   declared: WebsiteContent["items"],
 ): WebsiteContent {
+  // Start with all baked items (preserving owner-entered values). Overlay
+  // declared items on top for keys that match (updating label/help/kind).
+  // Never drop baked items — the owner's data is precious; a slot the agent
+  // no longer declares is just one the owner can still see and edit.
   const byKey = new Map<string, WebsiteContent["items"][number]>();
   for (const item of baked?.items ?? []) byKey.set(item.key, item);
   for (const item of declared) {
     const existing = byKey.get(item.key);
-    // Keep the owner's value/asset if they already filled this slot.
     byKey.set(item.key, existing ? { ...item, value: existing.value, assetId: existing.assetId } : item);
   }
   return { items: [...byKey.values()] };
@@ -349,4 +401,18 @@ function mergeContent(
 
 function slug(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "item";
+}
+
+/** Scan the project for any @wix/site-* imports — these can never work. */
+async function findHostModuleImports(workspace: LocalWorkspace): Promise<string[]> {
+  const results: string[] = [];
+  try {
+    const output = (await workspace.exec("grep", ["-rn", "@wix/site-", "src/"], { timeoutMs: 5000 })).stdout;
+    for (const line of output.trim().split("\n")) {
+      if (line) results.push(line.slice(0, 200));
+    }
+  } catch {
+    // grep returns non-zero when nothing matches — that's success.
+  }
+  return results;
 }

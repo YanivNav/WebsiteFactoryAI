@@ -17,7 +17,7 @@ type InputArtifactType<
 export class WorkContext<K extends WorkOperation = WorkOperation> {
   constructor(
     public readonly work: LeasedWork<K>,
-    private readonly workerId: string,
+    public readonly workerId: string,
     private readonly server: ServerAccess,
   ) {}
 

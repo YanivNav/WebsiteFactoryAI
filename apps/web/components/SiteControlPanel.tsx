@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "convex/react";
+import { wixDashboardUrl } from "@factory/shared";
 import { api } from "@convex/_generated/api";
-import type { Id } from "@convex/_generated/dataModel";
+import type { Doc, Id } from "@convex/_generated/dataModel";
 import type { ContentItemInput } from "@/data/useUserTask";
-import { ArrowLeft, ExternalLink, LayoutDashboard, MonitorPlay, PenLine, Plus, Rocket, Sparkles, Wrench } from "lucide-react";
+import { ArrowLeft, ExternalLink, GitCommit, LayoutDashboard, MonitorPlay, PenLine, Plus, Rocket, Sparkles, Square, Wrench } from "lucide-react";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import { WebsiteContentForm } from "./artifacts/WebsiteContentArtifact";
 import { ManualTasksList } from "./artifacts/ManualTasksArtifact";
+import { DevConsole } from "./DevConsole";
 
 /**
  * The post-build control panel: dev, preview, publish, content editing, change
@@ -24,8 +26,10 @@ export function SiteControlPanel({ detail }: { detail: ProjectDetail }) {
   const siteId = wix?.siteId ?? (detail.artifacts.wixProject[0]?.data as any)?.wix?.siteId as string | undefined;
   const liveUrl = wix?.liveUrl;
   const previewUrl = wix?.previewUrl ?? build?.previewUrl;
-  const devUrl = wix?.devUrl;
-  const dashboardUrl = wix?.dashboardUrl ?? (siteId ? `https://manage.wix.com/dashboard/${siteId}/home` : undefined);
+  const devSession = detail.devSession;
+  // Derived from the real metasite id — a reliable, site-scoped dashboard link.
+  // Falls back to composing from siteId if the stored value predates this.
+  const dashboardUrl = wix?.dashboardUrl ?? wixDashboardUrl(siteId);
 
   const content = detail.artifacts.websiteContent.find(
     (a) => a.id === build?.contentArtifactId,
@@ -40,13 +44,19 @@ export function SiteControlPanel({ detail }: { detail: ProjectDetail }) {
       <SiteHeader
         liveUrl={liveUrl}
         previewUrl={previewUrl}
-        devUrl={devUrl}
+        devSession={devSession}
         dashboardUrl={dashboardUrl}
         siteId={siteId}
         isLive={isLive}
         projectId={projectId}
         builtAt={build?.builtAt}
       />
+
+      {/* Dev server console — live Astro logs (present once dev has been started) */}
+      <DevConsole projectId={projectId} session={devSession} />
+
+      {/* Git history */}
+      <GitHistoryCard projectId={projectId} repoRevision={build?.repoRevision} commits={build?.commits} />
 
       {/* Screens */}
       <ScreensCard detail={detail} projectId={projectId} />
@@ -69,7 +79,7 @@ export function SiteControlPanel({ detail }: { detail: ProjectDetail }) {
 function SiteHeader({
   liveUrl,
   previewUrl,
-  devUrl,
+  devSession,
   dashboardUrl,
   siteId,
   isLive,
@@ -78,7 +88,7 @@ function SiteHeader({
 }: {
   liveUrl?: string;
   previewUrl?: string;
-  devUrl?: string;
+  devSession?: Doc<"devSessions">;
   dashboardUrl?: string;
   siteId?: string;
   isLive: boolean;
@@ -86,17 +96,10 @@ function SiteHeader({
   builtAt?: number;
 }) {
   const publishSite = useMutation(api.projects.publishSite);
-  const startDevServer = useMutation(api.projects.startDevServer);
   const startPreview = useMutation(api.projects.startPreview);
   const returnToBuildMode = useMutation(api.projects.returnToBuildMode);
   const [publishing, setPublishing] = useState(false);
-  const [startingDev, setStartingDev] = useState(false);
   const [generatingPreview, setGeneratingPreview] = useState(false);
-  const devLoading = devUrl === "pending";
-
-  // Best URL to show: live > preview > nothing.
-  const displayUrl = liveUrl ?? previewUrl;
-  const displayLabel = isLive ? "Live" : displayUrl ? "Preview" : null;
 
   return (
     <section className="border-outline rounded border bg-white p-5">
@@ -104,49 +107,35 @@ function SiteHeader({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="text-ink truncate text-lg font-semibold tracking-[-0.01em]">
-              {displayUrl ? (
-                <a
-                  href={displayUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hover:text-primary hover:underline"
-                >
-                  {siteHostname(displayUrl)}
-                </a>
+              {liveUrl ? (
+                <>
+                  <a
+                    href={liveUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:text-primary hover:underline"
+                  >
+                    {siteHostname(liveUrl)}
+                  </a>
+                  <a
+                    href={liveUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-ink-muted hover:text-ink ml-1 inline-block align-middle"
+                    title="Open live site"
+                  >
+                    <ExternalLink size={14} />
+                  </a>
+                </>
               ) : siteId ? (
                 <span className="text-ink-muted">Site built — not yet published</span>
               ) : (
                 "Your site"
               )}
             </h2>
-            {displayUrl && (
-              <a
-                href={displayUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-ink-muted hover:text-ink"
-                title={`Open ${displayLabel} site`}
-              >
-                <ExternalLink size={14} />
-              </a>
-            )}
-            {dashboardUrl && (
-              <a
-                href={dashboardUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-ink-muted hover:text-ink"
-                title="Open Wix dashboard"
-              >
-                <LayoutDashboard size={14} />
-              </a>
-            )}
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <StatusBadge isLive={isLive} />
-            {displayLabel && (
-              <span className="text-ink-muted text-[10px]">({displayLabel})</span>
-            )}
+            <StatusBadge isLive={!!liveUrl} />
             {builtAt && (
               <span className="text-ink-muted text-xs">
                 Last updated {formatDate(builtAt)}
@@ -162,47 +151,59 @@ function SiteHeader({
           >
             <ArrowLeft size={12} /> Build mode
           </button>
-          {/* Dev */}
-          {devLoading ? (
-            <span className="border-outline text-ink-muted inline-flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-xs font-medium">
-              <Wrench size={14} className="animate-spin" /> Starting dev...
-            </span>
-          ) : devUrl && devUrl !== "pending" ? (
+          {/* Wix dashboard — a real, site-scoped link (derived from the site id). */}
+          {dashboardUrl && (
             <a
-              href={devUrl}
+              href={dashboardUrl}
               target="_blank"
               rel="noreferrer"
               className="border-outline text-ink-muted hover:text-ink inline-flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-xs font-medium transition-colors"
+              title="Open this site's Wix dashboard"
             >
-              <Wrench size={14} /> Dev
+              <LayoutDashboard size={14} /> Dashboard
             </a>
-          ) : (
+          )}
+          {/* Dev server — long-lived; opens automatically and streams logs below. */}
+          <DevButton projectId={projectId} session={devSession} />
+          {/* Preview — generates a fresh test deploy. If a preview URL exists, show it. */}
+          <div className="inline-flex items-center rounded border border-outline overflow-hidden">
+            {previewUrl ? (
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 bg-white px-3 py-1.5 text-xs font-medium transition-colors"
+                title="Open preview site"
+              >
+                <MonitorPlay size={14} /> Preview
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled={generatingPreview}
+                onClick={() => {
+                  setGeneratingPreview(true);
+                  void startPreview({ projectId }).finally(() => setGeneratingPreview(false));
+                }}
+                className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 bg-white px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+              >
+                <MonitorPlay size={14} /> {generatingPreview ? "Building..." : "Preview"}
+              </button>
+            )}
             <button
               type="button"
-              disabled={startingDev}
+              disabled={generatingPreview}
               onClick={() => {
-                setStartingDev(true);
-                void startDevServer({ projectId }).finally(() => setStartingDev(false));
+                setGeneratingPreview(true);
+                void startPreview({ projectId }).finally(() => setGeneratingPreview(false));
               }}
-              className="border-outline text-ink-muted hover:text-ink inline-flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+              className="text-ink-muted hover:text-ink border-l border-outline bg-white px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+              title="Build a fresh preview"
             >
-              <Wrench size={14} /> {startingDev ? "Starting..." : "Dev"}
+              {generatingPreview ? "⏳" : "↻"}
             </button>
-          )}
-          {/* Preview — always a build+preview action button */}
-          <button
-            type="button"
-            disabled={generatingPreview}
-            onClick={() => {
-              setGeneratingPreview(true);
-              void startPreview({ projectId }).finally(() => setGeneratingPreview(false));
-            }}
-            className="border-outline text-ink-muted hover:text-ink inline-flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-            title="Build the site and generate a fresh preview URL"
-          >
-            <MonitorPlay size={14} /> {generatingPreview ? "Building..." : "Preview"}
-          </button>
-          {/* Publish */}
+          </div>
+          {/* Publish — builds and deploys to the live domain. */}
           <button
             type="button"
             disabled={publishing}
@@ -212,11 +213,86 @@ function SiteHeader({
             }}
             className="bg-primary inline-flex items-center gap-1.5 rounded px-4 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
-            <Rocket size={14} /> {publishing ? "Publishing..." : isLive ? "Republish" : "Publish"}
+            <Rocket size={14} /> {publishing ? "Publishing..." : liveUrl ? "Republish" : "Publish"}
           </button>
         </div>
       </div>
     </section>
+  );
+}
+
+/** The dev-server control: start it, open its live link, and stop it. */
+function DevButton({ projectId, session }: { projectId: Id<"projects">; session?: Doc<"devSessions"> }) {
+  const startDevServer = useMutation(api.projects.startDevServer);
+  const stopDevServer = useMutation(api.projects.stopDevServer);
+  const [busy, setBusy] = useState(false);
+  const openedRef = useRef<string | null>(null);
+
+  const status = session?.status;
+  const url = session?.url;
+
+  // Auto-open the dev site in a new tab the moment it starts serving.
+  useEffect(() => {
+    if (status === "running" && url && openedRef.current !== url) {
+      openedRef.current = url;
+      window.open(url, "_blank", "noopener");
+    }
+    if (status !== "running") openedRef.current = null;
+  }, [status, url]);
+
+  if (status === "running" && url) {
+    return (
+      <span className="border-outline inline-flex items-center overflow-hidden rounded border">
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          title="Open the dev site"
+          className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 bg-white px-3 py-1.5 text-xs font-medium"
+        >
+          <Wrench size={14} className="text-[#22a75a]" /> Dev
+        </a>
+        <button
+          type="button"
+          title="Stop the dev server"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void stopDevServer({ projectId }).finally(() => setBusy(false));
+          }}
+          className="text-ink-muted hover:text-ink border-outline border-l bg-white px-2 py-1.5 text-xs disabled:opacity-50"
+        >
+          <Square size={12} />
+        </button>
+      </span>
+    );
+  }
+
+  if (status === "starting" || busy) {
+    return (
+      <span className="border-outline text-ink-muted inline-flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-xs font-medium">
+        <Wrench size={14} className="animate-spin" /> Starting…
+      </span>
+    );
+  }
+
+  const failed = status === "error";
+  return (
+    <button
+      type="button"
+      title={failed ? session?.exitReason ?? "The dev server stopped unexpectedly" : "Start the dev server"}
+      onClick={() => {
+        setBusy(true);
+        void startDevServer({ projectId }).finally(() => setBusy(false));
+      }}
+      className={`inline-flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+        failed
+          ? "border-[#f2c2bf] text-[#a82922] hover:opacity-80"
+          : "border-outline text-ink-muted hover:text-ink"
+      }`}
+    >
+      <Wrench size={14} /> {failed ? "Dev failed — retry" : "Dev"}
+    </button>
   );
 }
 
@@ -309,6 +385,84 @@ function ChangeRequestCard({ projectId }: { projectId: Id<"projects"> }) {
         >
           {busy ? "Requesting..." : "Request Change"}
         </button>
+      </div>
+    </section>
+  );
+}
+
+function GitHistoryCard({
+  projectId,
+  repoRevision,
+  commits,
+}: {
+  projectId: Id<"projects">;
+  repoRevision?: string;
+  commits?: Array<{ sha: string; message: string; date: string }>;
+}) {
+  const revertToCommit = useMutation(api.projects.revertToCommit);
+  const [reverting, setReverting] = useState<string | null>(null);
+
+  if (!commits || commits.length === 0) {
+    return (
+      <section className="border-outline rounded border bg-white p-4">
+        <h3 className="text-ink flex items-center gap-2 text-sm font-semibold">
+          <GitCommit size={14} /> Git History
+        </h3>
+        {repoRevision ? (
+          <p className="text-ink-muted mt-1 font-mono text-xs">{repoRevision.slice(0, 7)} (current)</p>
+        ) : (
+          <p className="text-ink-muted mt-1 text-xs">Loading...</p>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="border-outline rounded border bg-white p-4">
+      <h3 className="text-ink mb-2 flex items-center gap-2 text-sm font-semibold">
+        <GitCommit size={14} /> Git History ({commits.length} commits)
+      </h3>
+      <div className="max-h-48 overflow-y-auto space-y-1">
+        {commits.map((commit) => {
+          const isCurrent = commit.sha === repoRevision;
+          const date = commit.date ? new Date(commit.date) : null;
+          return (
+            <div
+              key={commit.sha}
+              className={`text-xs flex items-center justify-between gap-2 rounded px-2 py-1 ${
+                isCurrent ? "bg-[#edf5ff]" : ""
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="text-ink">{commit.message.slice(0, 80)}</span>
+                {date && (
+                  <span className="text-ink-muted ml-1">
+                    &mdash; {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    {date.getFullYear() !== new Date().getFullYear()
+                      ? `, ${date.getFullYear()}`
+                      : ""}
+                  </span>
+                )}
+                {isCurrent && (
+                  <span className="text-primary ml-1 text-[10px] font-medium">(current)</span>
+                )}
+              </div>
+              {!isCurrent && (
+                <button
+                  type="button"
+                  disabled={reverting === commit.sha}
+                  className="text-primary shrink-0 text-[10px] hover:underline disabled:opacity-50"
+                  onClick={() => {
+                    setReverting(commit.sha);
+                    void revertToCommit({ projectId, commit: commit.sha });
+                  }}
+                >
+                  {reverting === commit.sha ? "..." : "restore"}
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );

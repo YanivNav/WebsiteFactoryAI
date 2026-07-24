@@ -22,7 +22,17 @@ export type WorkRevision = {
   cleanRebuild?: boolean;
   /** When set, restore the site's code to this git commit instead of generating. */
   revertToCommit?: string;
+  /** When true, skip building and only start the dev server (a fast trigger). */
+  devOnly?: boolean;
+  /** When true, build the site and generate a fresh preview URL. */
+  previewOnly?: boolean;
+  /** When true, stop the project's running dev server (a fast trigger). */
+  stopDev?: boolean;
 };
+
+/** One line of streamed dev-server output. */
+export type DevLogLine = { stream: "out" | "err"; line: string };
+export type DevSessionStatus = "starting" | "running" | "stopped" | "error";
 
 export type ArtifactAsset = {
   id: string;
@@ -77,7 +87,7 @@ export type UserTaskDraft = {
 
 export type WorkCompletion =
   | { type: "completeProject" }
-  | { type: "completeAndSetReady"; devUrl?: string; previewUrl?: string; liveUrl?: string; dashboardUrl?: string }
+  | { type: "completeAndSetReady"; devUrl?: string; previewUrl?: string; previewDashboardUrl?: string; liveUrl?: string; dashboardUrl?: string }
   | { type: "startWork"; work: WorkDraft }
   | { type: "createUserTask"; task: UserTaskDraft };
 
@@ -157,4 +167,22 @@ export interface ServerAccess {
   claimScreenRevisions(workId: WorkId, workerId: string): Promise<ScreenRevisionRequest[]>;
   /** Resolve a storage id to a download URL. */
   getFileUrl(storageId: string): Promise<string | null>;
+
+  // ---- Dev server: a long-lived session, decoupled from the work loop -------
+  /** Begin a dev session for a project (resets its state and clears old logs). */
+  startDevSession(input: { projectId: ProjectId; workerId: string }): Promise<void>;
+  /** Update a dev session's status/url as the server starts, serves, or exits. */
+  updateDevSession(input: {
+    projectId: ProjectId;
+    workerId: string;
+    status: DevSessionStatus;
+    url?: string;
+    exitReason?: string;
+  }): Promise<void>;
+  /** Append a batch of streamed dev-server log lines. */
+  appendDevLogs(input: {
+    projectId: ProjectId;
+    workerId: string;
+    lines: DevLogLine[];
+  }): Promise<void>;
 }

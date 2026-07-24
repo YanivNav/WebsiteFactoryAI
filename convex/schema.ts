@@ -27,6 +27,8 @@ export const revisionValidator = v.object({
   devOnly: v.optional(v.boolean()),
   // When true, build the site and generate a fresh preview URL.
   previewOnly: v.optional(v.boolean()),
+  // When true, stop the project's running dev server.
+  stopDev: v.optional(v.boolean()),
 });
 
 export const userTaskResultValidator = v.union(
@@ -79,6 +81,7 @@ export default defineSchema({
         appId: v.optional(v.string()),
         liveUrl: v.optional(v.string()),
         previewUrl: v.optional(v.string()),
+        previewDashboardUrl: v.optional(v.string()),
         devUrl: v.optional(v.string()),
         dashboardUrl: v.optional(v.string()),
       }),
@@ -183,5 +186,31 @@ export default defineSchema({
     level: v.union(v.literal("info"), v.literal("warn"), v.literal("error")),
     message: v.string(),
     data: v.optional(v.any()),
+  }).index("by_project", ["projectId"]),
+
+  // A project's dev server, as live state the UI renders (one small doc per
+  // project, patched through starting → running → stopped/error). Kept out of
+  // the projects doc so the worker's frequent writes don't contend with it.
+  devSessions: defineTable({
+    projectId: v.id("projects"),
+    status: v.union(
+      v.literal("starting"),
+      v.literal("running"),
+      v.literal("stopped"),
+      v.literal("error"),
+    ),
+    url: v.optional(v.string()),
+    workerId: v.optional(v.string()),
+    exitReason: v.optional(v.string()),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_project", ["projectId"]),
+
+  // Streamed dev-server output (the Astro logs). Append-only narration in its own
+  // table — cleared when a session (re)starts, tailed by the reader.
+  devLogs: defineTable({
+    projectId: v.id("projects"),
+    stream: v.union(v.literal("out"), v.literal("err")),
+    line: v.string(),
   }).index("by_project", ["projectId"]),
 });

@@ -19,6 +19,9 @@ const functions = {
   generateUploadUrl: mutation("worker:generateUploadUrl"),
   claimScreenRevisions: mutation("worker:claimScreenRevisions"),
   getFileUrl: query("worker:getFileUrl"),
+  startDevSession: mutation("worker:startDevSession"),
+  updateDevSession: mutation("worker:updateDevSession"),
+  appendDevLogs: mutation("worker:appendDevLogs"),
 } as const;
 
 export class ConvexServer implements ServerAccess {
@@ -123,5 +126,17 @@ export class ConvexServer implements ServerAccess {
       workId,
       workerId,
     })) as ScreenRevisionRequest[];
+  }
+
+  async startDevSession(input: Parameters<ServerAccess["startDevSession"]>[0]): Promise<void> {
+    await this.client.mutation(functions.startDevSession, input);
+  }
+
+  async updateDevSession(input: Parameters<ServerAccess["updateDevSession"]>[0]): Promise<void> {
+    await this.client.mutation(functions.updateDevSession, input);
+  }
+
+  async appendDevLogs(input: Parameters<ServerAccess["appendDevLogs"]>[0]): Promise<void> {
+    await this.client.mutation(functions.appendDevLogs, input);
   }
 }

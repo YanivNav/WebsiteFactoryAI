@@ -56,6 +56,31 @@ export interface Workspace {
   execOrThrow(command: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
   /** Run a command in the PARENT directory of the checkout (for scaffolds that create it). */
   execInParent(command: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
+  /**
+   * Start a LONG-LIVED process inside the checkout and return a handle — for
+   * servers like `wix dev` that never exit on their own. Unlike `exec`, this does
+   * not await completion: output is streamed line by line to the handlers, and
+   * the caller stops it with `kill()`. Keeping this behind the Workspace layer is
+   * what lets a container swap in without any operation importing `child_process`.
+   */
+  spawnBackground(
+    command: string,
+    args: string[],
+    options: Pick<ExecOptions, "env" | "stripPackageManagerEnv" | "cwd">,
+    handlers: BackgroundProcessHandlers,
+  ): BackgroundProcess;
+}
+
+export interface BackgroundProcessHandlers {
+  onStdout?: (line: string) => void;
+  onStderr?: (line: string) => void;
+  /** Called once when the process exits or fails to start (code null = spawn error). */
+  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+}
+
+export interface BackgroundProcess {
+  /** Terminate the process (SIGTERM, escalating to SIGKILL if it lingers). */
+  kill(): void;
 }
 
 export { LocalWorkspace, ensureAgentHome, workspacesRoot } from "./local";

@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 import { ConvexServer } from "./server/convex.js";
 import { LocalRunner } from "./runner/local.js";
+import { getDevServerManager } from "./services/dev-server.js";
 
 // Load env from the REPO ROOT, not the cwd.
 //
@@ -47,11 +48,15 @@ let running = true;
 async function main(): Promise<void> {
   const store = new ConvexServer(CONVEX_URL!, LEASE_TTL_SECONDS);
   const runner = new LocalRunner(store, WORKER_INSTANCE_ID, LEASE_TTL_SECONDS);
+  // Long-lived dev servers live outside the work loop; give the manager the store.
+  getDevServerManager().configure(store);
 
   console.error(`[worker ${WORKER_INSTANCE_ID}] started — polling ${CONVEX_URL}`);
 
   const shutdown = (signal: string) => {
     console.error(`[worker ${WORKER_INSTANCE_ID}] ${signal} — shutting down`);
+    // A lost dev server is a cache, not state — stop them all cleanly.
+    getDevServerManager().stopAll();
     running = false;
   };
   process.on("SIGINT", () => shutdown("SIGINT"));

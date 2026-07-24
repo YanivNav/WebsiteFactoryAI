@@ -132,23 +132,21 @@ export const completeUserTask = mutation({
     const nextWork = WORK_DEFINITIONS[producingOperation].next;
 
     if (nextWork === "completeProject") {
-      // Ensure siteId is in project.wix — it might have only been set on the
-      // WixProject artifact. The control panel needs it for dashboard links.
-      const wixPatch: Record<string, string | undefined> = {};
-      if (!project.wix?.siteId) {
-        const wixProjectId = approvedArtifacts.wixProject;
-        if (wixProjectId) {
-          const wixProject = await ctx.db.get(wixProjectId);
-          const artifactSiteId = (wixProject?.data as { wix?: { siteId?: string } } | undefined)?.wix?.siteId;
-          if (artifactSiteId) wixPatch.siteId = artifactSiteId;
-        }
-      }
+      // Copy preview URLs from the build artifact into project.wix so the
+      // control panel shows them. These come from real Wix CLI output.
+      const build = subject.type === "siteBuild"
+        ? (subject.data as { previewUrl?: string; dashboardUrl?: string })
+        : null;
       const patch: Record<string, unknown> = {
         approvedArtifacts,
         currentActivity: { type: "ready" as const },
       };
-      if (Object.keys(wixPatch).length > 0) {
-        patch.wix = { ...(project.wix ?? {}), ...wixPatch };
+      if (build?.previewUrl || build?.dashboardUrl) {
+        const existing = project.wix ?? {};
+        const wix: Record<string, string | undefined> = { ...existing };
+        if (build.previewUrl) wix.previewUrl = build.previewUrl;
+        if (build.dashboardUrl) wix.previewDashboardUrl = build.dashboardUrl;
+        patch.wix = wix;
       }
       await ctx.db.patch(project._id, patch);
       return;
@@ -374,6 +372,39 @@ export const rebuildSiteClean = mutation({
  * history, so this replays that build's commit into the working tree and
  * commits it forward — the version you reverted from stays in history.
  */
+/** Revert the site's code to a specific git commit. Works from the control panel. */
+export const revertToCommit = mutation({
+  args: { projectId: v.id("projects"), commit: v.string() },
+  handler: async (ctx, { projectId, commit }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("Cannot revert while the site is busy");
+    }
+    const latestBuild = await ctx.db
+      .query("artifacts")
+      .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+      .order("desc")
+      .first();
+    if (!latestBuild) throw new Error("No build to revert from");
+
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      projectId,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "regenerate", baseArtifactId: latestBuild._id, revertToCommit: commit },
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
+  },
+});
+
 export const revertSiteTo = mutation({
   args: { projectId: v.id("projects"), buildArtifactId: v.id("artifacts") },
   handler: async (ctx, { projectId, buildArtifactId }) => {
@@ -643,7 +674,6 @@ export const startDevServer = mutation({
     }
     await cancelCurrentActivity(ctx, project);
     const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
-    const existing = project.wix ?? {};
     const workId = await insertWork(
       ctx,
       projectId,
@@ -656,10 +686,36 @@ export const startDevServer = mutation({
       },
       "queued",
     );
-    await ctx.db.patch(projectId, {
-      currentActivity: { type: "work", workId },
-      wix: { ...existing, devUrl: "pending" },
-    });
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
+  },
+});
+
+/**
+ * Stop the project's running dev server. Queues a fast trigger work; the worker's
+ * DevServerManager kills the background process and marks the session stopped.
+ */
+export const stopDevServer = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const project = await requireProject(ctx, projectId);
+    if (project.currentActivity.type !== "ready" && project.currentActivity.type !== "completed") {
+      throw new Error("The dev server can only be stopped when the site is ready");
+    }
+    await cancelCurrentActivity(ctx, project);
+    const draft = buildWorkDraft("buildSite", (type) => project.approvedArtifacts[type]);
+    const workId = await insertWork(
+      ctx,
+      projectId,
+      {
+        ...draft,
+        instruction: {
+          ...draft.instruction,
+          revision: { mode: "initial", stopDev: true } as any,
+        },
+      },
+      "queued",
+    );
+    await ctx.db.patch(projectId, { currentActivity: { type: "work", workId } });
   },
 });
 
@@ -677,22 +733,7 @@ export const publishSite = mutation({
     await cancelCurrentActivity(ctx, project);
     const draft = buildWorkDraft("publishSite", (type) => project.approvedArtifacts[type]);
     const workId = await insertWork(ctx, project._id, draft, "queued");
-    // Build a guaranteed dashboard URL from siteId. Try project.wix first,
-    // then fall back to the WixProject artifact (set during site setup).
-    let siteId = project.wix?.siteId;
-    if (!siteId) {
-      const wixProjectId = project.approvedArtifacts.wixProject;
-      if (wixProjectId) {
-        const wixProject = await ctx.db.get(wixProjectId);
-        siteId = (wixProject?.data as { wix?: { siteId?: string } } | undefined)?.wix?.siteId;
-      }
-    }
-    const dashboardUrl = siteId ? `https://manage.wix.com/dashboard/${siteId}/home` : undefined;
-    const existing = project.wix ?? {};
-    await ctx.db.patch(project._id, {
-      currentActivity: { type: "work", workId },
-      wix: { ...existing, dashboardUrl: dashboardUrl ?? existing.dashboardUrl, siteId: siteId ?? existing.siteId },
-    });
+    await ctx.db.patch(project._id, { currentActivity: { type: "work", workId } });
   },
 });
 
@@ -895,6 +936,11 @@ export const detail = query({
       artifacts.map((artifact) => resolveArtifact(ctx, artifact)),
     );
 
+    const devSession = await ctx.db
+      .query("devSessions")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .first();
+
     return {
       project,
       currentWork,
@@ -905,7 +951,33 @@ export const detail = query({
       designProgress,
       logs,
       artifacts: resolvedArtifacts,
+      // The streaming dev logs live on their own `devConsole` query so they don't
+      // re-run this heavy one; only the (rarely-changing) session is here.
+      devSession,
     };
+  },
+});
+
+/**
+ * The dev server console: the session plus a generous tail of streamed output.
+ * Kept separate from `detail` so high-frequency log streaming doesn't re-run the
+ * project detail query — and so a full stack trace isn't lost to a small window.
+ */
+export const devConsole = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const session = await ctx.db
+      .query("devSessions")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .first();
+    if (!session) return { session: null, logs: [] };
+    // Newest 1500 lines from the index, returned chronological.
+    const logsDesc = await ctx.db
+      .query("devLogs")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .order("desc")
+      .take(1500);
+    return { session, logs: logsDesc.reverse() };
   },
 });
 

@@ -32,6 +32,8 @@ export interface ProjectDetail {
   logs: Doc<"logs">[];
   artifacts: ArtifactsMap;
   approvedArtifactIds: Partial<Record<ArtifactType, string>>;
+  /** The project's dev server, if one has been started this session. */
+  devSession?: Doc<"devSessions">;
 }
 
 export type ProjectDetailResult =
@@ -65,6 +67,7 @@ export function useProjectDetail(projectId: Id<"projects">): ProjectDetailResult
       logs: data.logs,
       artifacts,
       approvedArtifactIds: data.project.approvedArtifacts,
+      devSession: data.devSession ?? undefined,
     };
   }, [data]);
 

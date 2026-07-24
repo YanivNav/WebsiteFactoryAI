@@ -1,8 +1,15 @@
 import { mkdir, readdir, readFile, writeFile, access } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import type { Readable } from "node:stream";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExecOptions, ExecResult, Workspace } from ".";
+import type {
+  BackgroundProcess,
+  BackgroundProcessHandlers,
+  ExecOptions,
+  ExecResult,
+  Workspace,
+} from ".";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -33,7 +40,9 @@ export async function ensureAgentHome(files: Record<string, string>): Promise<st
   );
   await mkdir(home, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
-    await writeFile(path.join(home, name), content, "utf8");
+    const filePath = path.join(home, name);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content, "utf8");
   }
   return home;
 }
@@ -119,6 +128,74 @@ export class LocalWorkspace implements Workspace {
     await mkdir(parent, { recursive: true });
     return runProcess(command, args, parent, options);
   }
+
+  spawnBackground(
+    command: string,
+    args: string[],
+    options: Pick<ExecOptions, "env" | "stripPackageManagerEnv" | "cwd">,
+    handlers: BackgroundProcessHandlers,
+  ): BackgroundProcess {
+    const child = spawn(command, args, {
+      cwd: path.join(this.root, options.cwd ?? ""),
+      env: buildEnv(options),
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+    });
+    streamLines(child.stdout, handlers.onStdout);
+    streamLines(child.stderr, handlers.onStderr);
+    let done = false;
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (done) return;
+      done = true;
+      handlers.onExit?.(code, signal);
+    };
+    child.on("exit", finish);
+    // A spawn failure (e.g. command not found) never emits "exit".
+    child.on("error", () => finish(null, null));
+
+    let killed = false;
+    return {
+      kill() {
+        if (killed) return;
+        killed = true;
+        child.kill("SIGTERM");
+        // Escalate if it ignores SIGTERM; don't keep the worker alive waiting.
+        setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Already gone.
+          }
+        }, 3000).unref();
+      },
+    };
+  }
+}
+
+/** Emit each complete line from a stream, buffering partial trailing lines. */
+function streamLines(stream: Readable | null, onLine?: (line: string) => void): void {
+  if (!stream || !onLine) return;
+  let buffer = "";
+  stream.on("data", (chunk: Buffer) => {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) onLine(line.replace(/\r$/, ""));
+  });
+  stream.on("end", () => {
+    if (buffer.trim()) onLine(buffer.replace(/\r$/, ""));
+  });
+}
+
+/** Build the child env, optionally stripping the parent package-manager fingerprint. */
+function buildEnv(options?: Pick<ExecOptions, "env" | "stripPackageManagerEnv">): NodeJS.ProcessEnv {
+  const env: Record<string, string | undefined> = { ...process.env, ...options?.env };
+  if (options?.stripPackageManagerEnv) {
+    for (const key of Object.keys(env)) {
+      if (/^(npm_|pnpm_)/i.test(key)) delete env[key];
+    }
+  }
+  return env;
 }
 
 function runProcess(
@@ -127,16 +204,10 @@ function runProcess(
   cwd: string,
   options?: ExecOptions,
 ): Promise<ExecResult> {
-  const env: Record<string, string | undefined> = { ...process.env, ...options?.env };
-  if (options?.stripPackageManagerEnv) {
-    for (const key of Object.keys(env)) {
-      if (/^(npm_|pnpm_)/i.test(key)) delete env[key];
-    }
-  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      env,
+      env: buildEnv(options),
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });

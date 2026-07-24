@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, type MutationCtx, query } from "./_generated/server";
 import {
   artifactTypeValidator,
   phaseValidator,
@@ -16,7 +17,7 @@ const workDraftValidator = v.object({
 
 const workCompletionValidator = v.union(
   v.object({ type: v.literal("completeProject") }),
-  v.object({ type: v.literal("completeAndSetReady"), devUrl: v.optional(v.string()), previewUrl: v.optional(v.string()), liveUrl: v.optional(v.string()), dashboardUrl: v.optional(v.string()) }),
+  v.object({ type: v.literal("completeAndSetReady"), devUrl: v.optional(v.string()), previewUrl: v.optional(v.string()), previewDashboardUrl: v.optional(v.string()), liveUrl: v.optional(v.string()), dashboardUrl: v.optional(v.string()) }),
   v.object({ type: v.literal("startWork"), work: workDraftValidator }),
   v.object({
     type: v.literal("createUserTask"),
@@ -160,6 +161,100 @@ export const claimScreenRevisions = mutation({
       .collect();
     await Promise.all(pending.map((row) => ctx.db.patch(row._id, { status: "claimed" })));
     return pending.map((row) => ({ screenPath: row.screenPath, feedback: row.feedback }));
+  },
+});
+
+// ---- Dev server sessions --------------------------------------------------
+
+const DEV_LOG_LINE = v.object({
+  stream: v.union(v.literal("out"), v.literal("err")),
+  line: v.string(),
+});
+
+async function currentDevSession(ctx: MutationCtx, projectId: Id<"projects">) {
+  return ctx.db
+    .query("devSessions")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .first();
+}
+
+export const startDevSession = mutation({
+  args: { projectId: v.id("projects"), workerId: v.string() },
+  handler: async (ctx, { projectId, workerId }) => {
+    // A fresh session starts from a clean log — old runs shouldn't bleed in.
+    const oldLogs = await ctx.db
+      .query("devLogs")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    for (const log of oldLogs) await ctx.db.delete(log._id);
+
+    const now = Date.now();
+    const existing = await currentDevSession(ctx, projectId);
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        status: "starting",
+        url: undefined,
+        exitReason: undefined,
+        workerId,
+        startedAt: now,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("devSessions", {
+        projectId,
+        status: "starting",
+        workerId,
+        startedAt: now,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+export const updateDevSession = mutation({
+  args: {
+    projectId: v.id("projects"),
+    workerId: v.string(),
+    status: v.union(
+      v.literal("starting"),
+      v.literal("running"),
+      v.literal("stopped"),
+      v.literal("error"),
+    ),
+    url: v.optional(v.string()),
+    exitReason: v.optional(v.string()),
+  },
+  handler: async (ctx, { projectId, workerId, status, url, exitReason }) => {
+    const session = await currentDevSession(ctx, projectId);
+    if (!session) return;
+    // Only the worker that owns the session may update it — a stale worker
+    // must not clobber a fresher run.
+    if (session.workerId && session.workerId !== workerId) return;
+    await ctx.db.patch(session._id, {
+      status,
+      ...(url !== undefined ? { url } : {}),
+      ...(exitReason !== undefined ? { exitReason } : {}),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const appendDevLogs = mutation({
+  args: {
+    projectId: v.id("projects"),
+    workerId: v.string(),
+    lines: v.array(DEV_LOG_LINE),
+  },
+  handler: async (ctx, { projectId, workerId, lines }) => {
+    const session = await currentDevSession(ctx, projectId);
+    if (!session || (session.workerId && session.workerId !== workerId)) return;
+    // Insert log lines only — do NOT touch the session doc here. The session is
+    // read by the heavy `detail` query; patching it on every 400ms flush would
+    // make that query re-run (re-resolving every artifact) throughout a dev run.
+    // Streaming logs live on their own `devConsole` query instead.
+    for (const { stream, line } of lines) {
+      await ctx.db.insert("devLogs", { projectId, stream, line: line.slice(0, 2000) });
+    }
   },
 });
 
@@ -321,16 +416,18 @@ export const completeWork = mutation({
       return;
     }
     if (completion.type === "completeAndSetReady") {
-      const isLive = !!completion.liveUrl;
       const wixPatch: Record<string, string | undefined> = {};
       if (completion.liveUrl) wixPatch.liveUrl = completion.liveUrl;
       if (completion.previewUrl) wixPatch.previewUrl = completion.previewUrl;
       if (completion.devUrl) wixPatch.devUrl = completion.devUrl;
       if (completion.dashboardUrl) wixPatch.dashboardUrl = completion.dashboardUrl;
-      // A publishSite work always means the site is live — respect that even
-      // when the URL scraper couldn't find the site URL in CLI output.
-      const phase = work.instruction.type === "publishSite" ? ("completed" as const) : isLive ? ("completed" as const) : ("ready" as const);
-      const patch: Record<string, unknown> = { currentActivity: { type: phase } };
+      if (completion.previewDashboardUrl) wixPatch.previewDashboardUrl = completion.previewDashboardUrl;
+      // Never downgrade: publishSite work, a new liveUrl, or an existing
+      // liveUrl all mean the site stays live. Preview/dev just add URLs.
+      const isNowLive = work.instruction.type === "publishSite" || !!completion.liveUrl || !!project.wix?.liveUrl;
+      const patch: Record<string, unknown> = {
+        currentActivity: { type: isNowLive ? ("completed" as const) : ("ready" as const) },
+      };
       if (Object.keys(wixPatch).length > 0 && project.wix) patch.wix = { ...project.wix, ...wixPatch };
       await ctx.db.patch(project._id, patch);
       return;
