@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import type { WorkOperation } from "@factory/shared";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import { DesignProgress } from "./DesignProgress";
+import { AgentThoughts } from "./AgentThoughts";
 
 /** Operations with a richer live view rendered under the progress bar. */
 const OPERATION_PROGRESS_VIEWS: Partial<Record<WorkOperation, ComponentType<{ detail: ProjectDetail }>>> = {
@@ -43,6 +44,7 @@ export function WorkProgress({ detail }: { detail: ProjectDetail }) {
         </div>
       </section>
       {ProgressView && <ProgressView detail={detail} />}
+      <AgentThoughts detail={detail} />
     </div>
   );
 }
