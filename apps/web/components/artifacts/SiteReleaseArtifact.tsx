@@ -1,15 +1,11 @@
 import type { Artifact } from "@factory/shared";
 import { ExternalLink, PartyPopper } from "lucide-react";
-import type { ProjectDetail } from "@/data/useProjectDetail";
-import { SiteChangeRequest } from "../SiteChangeRequest";
 
-/** The published site: the live URL, plus a way to ask for the next change. */
+/** The published site: the live URL from the last release. */
 export function SiteReleaseView({
   artifact,
-  detail,
 }: {
   artifact: Artifact<"siteRelease">;
-  detail?: ProjectDetail;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -32,7 +28,6 @@ export function SiteReleaseView({
           </p>
         )}
       </section>
-      {detail && <SiteChangeRequest detail={detail} />}
     </div>
   );
 }

@@ -2,8 +2,7 @@ import type { Doc } from "@convex/_generated/dataModel";
 import type { ProjectDetail } from "@/data/useProjectDetail";
 import { WorkProgress } from "../progress/WorkProgress";
 import { DraftActivity } from "./DraftActivity";
-import { CompletedActivity } from "./CompletedActivity";
-import { SiteControlPanel } from "../SiteControlPanel";
+import { SiteControlPanel } from "../control/SiteControlPanel";
 import { UserTaskView } from "../tasks/UserTaskView";
 
 export function ActivityView({

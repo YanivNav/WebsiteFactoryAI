@@ -8,8 +8,8 @@ import type { Doc, Id } from "@convex/_generated/dataModel";
 import type { ContentItemInput } from "@/data/useUserTask";
 import { ArrowLeft, ExternalLink, GitCommit, LayoutDashboard, MonitorPlay, PenLine, Plus, Rocket, Sparkles, Square, Wrench } from "lucide-react";
 import type { ProjectDetail } from "@/data/useProjectDetail";
-import { WebsiteContentForm } from "./artifacts/WebsiteContentArtifact";
-import { ManualTasksList } from "./artifacts/ManualTasksArtifact";
+import { WebsiteContentForm } from "../artifacts/WebsiteContentArtifact";
+import { ManualTasksList } from "../artifacts/ManualTasksArtifact";
 import { DevConsole } from "./DevConsole";
 
 /**

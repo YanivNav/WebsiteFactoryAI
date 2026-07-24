@@ -109,7 +109,7 @@ const ARTIFACT_PRESENTATIONS: Partial<Record<ArtifactType, ArtifactPresentation>
   },
   siteRelease: {
     View: ({ artifact, detail }) => (
-      <SiteReleaseView artifact={artifact as Artifact<"siteRelease">} detail={detail} />
+      <SiteReleaseView artifact={artifact as Artifact<"siteRelease">} />
     ),
   },
   websiteContent: {
