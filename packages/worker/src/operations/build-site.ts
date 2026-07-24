@@ -1,6 +1,5 @@
 import { type ManualTasks, type SiteBuild, type Specification, type WebsiteContent, wixDashboardUrl } from "@factory/shared";
 import { CodeGenerator, type BuildReports } from "../services/code-generator";
-import { getDevServerManager } from "../services/dev-server";
 import { GitService } from "../services/git";
 import { resolveApp } from "../services/wix-apps";
 import { WixService } from "../services/wix";
@@ -29,41 +28,6 @@ export const buildSite: WorkHandler<"buildSite"> = {
     git ??= new GitService();
     wix ??= new WixService();
 
-    // Stop-dev: a fast trigger that kills the project's running dev server.
-    if (revision?.stopDev) {
-      await ctx.progress(50, "Stopping the dev server");
-      await getDevServerManager().stop(ctx.work.projectId, ctx.workerId);
-      return readyCompletion();
-    }
-
-    // Dev-only: a fast trigger that starts the dev server as a long-lived
-    // background process. It returns as soon as the URL is up (or a bound is
-    // hit); the server keeps running and streams its logs to the dev session.
-    if (revision?.devOnly) {
-      const devWorkspace = new LocalWorkspace(project.folderName);
-      const repo = await git.ensureRepo(project.folderName);
-      if (!(await devWorkspace.exists())) await git.restore(devWorkspace, repo);
-      await ctx.progress(30, "Starting the dev server");
-      await getDevServerManager().start(ctx.work.projectId, ctx.workerId, devWorkspace);
-      return readyCompletion();
-    }
-
-    // Preview-only: build and generate a fresh preview URL.
-    if (revision?.previewOnly) {
-      const prevWorkspace = new LocalWorkspace(project.folderName);
-      const repo = await git.ensureRepo(project.folderName);
-      if (!(await prevWorkspace.exists())) await git.restore(prevWorkspace, repo);
-      await ctx.progress(20, "Building for preview");
-      const buildResult = await runBuild(prevWorkspace);
-      if (buildResult.ok) {
-        await ctx.progress(60, "Creating a fresh preview");
-        const { siteUrl: previewUrl } = await wix.preview(ctx, prevWorkspace);
-        return readyCompletion({ previewUrl, previewDashboardUrl: wixDashboardUrl(project.wix.siteId) });
-      }
-      ctx.log("warn", `Preview build failed: ${buildResult.failure.stderr.slice(-500)}`);
-      return readyCompletion();
-    }
-
     const previousBuild = await ctx.getRevisionBase("siteBuild");
 
     // Owner content baked into this build: an explicit content version from the
@@ -87,13 +51,6 @@ export const buildSite: WorkHandler<"buildSite"> = {
     if (!(await workspace.exists())) {
       await ctx.progress(5, "Restoring your project");
       await git.restore(workspace, repo);
-    }
-
-    // Clean rebuild: revert the generated code to the fresh scaffold so the
-    // agent builds from a clean slate (same site/repo/spec/design/content).
-    if (revision?.cleanRebuild) {
-      await ctx.progress(8, "Resetting to a clean starting point");
-      await git.resetToScaffold(workspace);
     }
 
     const siteId = project.wix.siteId;
@@ -155,38 +112,30 @@ export const buildSite: WorkHandler<"buildSite"> = {
       }
     }
 
-    // 3. Produce the site's code — either restore an earlier version from git,
-    //    or run the coding agent (which works directly in the project, with the
-    //    brief and approved designs handed to it as files).
+    // 3. Run the coding agent on the project, with the spec and design handed
+    //    in as files alongside the skill docs.
     let summary: string;
     let reports: BuildReports;
-    if (revision?.revertToCommit) {
-      await ctx.progress(40, "Restoring the earlier version of your site");
-      await git.resetToCommit(workspace, revision.revertToCommit);
-      summary = `Restored the site to an earlier version (${revision.revertToCommit.slice(0, 7)}).`;
-      reports = { questions: [], manualTasks: [], content: [], unitsBuilt: [] };
-    } else {
-      await ctx.progress(30, "Building your pages and features");
-      const designAssets = new Map(designArtifact.assets.map((a) => [a.id, a]));
-      const designHtmlUrls: Record<string, string> = {};
-      for (const screen of designArtifact.data.screens) {
-        const url = designAssets.get(screen.htmlAssetId)?.url;
-        if (url) designHtmlUrls[screen.path] = url;
-      }
-      const isRefine = revision?.mode === "revise" && !!revision?.feedback;
-      const buildOrRefine = isRefine ? code.refine.bind(code) : code.build.bind(code);
-      const built = await buildOrRefine(ctx, {
-        workspace,
-        spec,
-        design: designArtifact.data,
-        designHtmlUrls,
-        content: bakedContent,
-        feedback: revision?.feedback,
-        siteId,
-      });
-      summary = built.summary;
-      reports = built.reports;
+    await ctx.progress(30, "Building your pages and features");
+    const designAssets = new Map(designArtifact.assets.map((a) => [a.id, a]));
+    const designHtmlUrls: Record<string, string> = {};
+    for (const screen of designArtifact.data.screens) {
+      const url = designAssets.get(screen.htmlAssetId)?.url;
+      if (url) designHtmlUrls[screen.path] = url;
     }
+    const isRefine = revision?.mode === "revise" && !!revision?.feedback;
+    const buildOrRefine = isRefine ? code.refine.bind(code) : code.build.bind(code);
+    const built = await buildOrRefine(ctx, {
+      workspace,
+      spec,
+      design: designArtifact.data,
+      designHtmlUrls,
+      content: bakedContent,
+      feedback: revision?.feedback,
+      siteId,
+    });
+    summary = built.summary;
+    reports = built.reports;
 
     // 4. Authoritative build check + one repair pass.
     //    First, scan for forbidden host-module imports — the agent sometimes
@@ -208,7 +157,7 @@ export const buildSite: WorkHandler<"buildSite"> = {
 
     await ctx.progress(74, "Checking your site builds");
     let buildOk = await runBuild(workspace);
-    if (!buildOk.ok && !revision?.revertToCommit) {
+    if (!buildOk.ok) {
       await ctx.progress(76, "Fixing a build issue");
       await code.repair(ctx, { workspace, summary, failure: buildOk.failure }, reports);
       buildOk = await runBuild(workspace);
@@ -271,13 +220,9 @@ export const buildSite: WorkHandler<"buildSite"> = {
 
     // 7. Back up the code.
     await ctx.progress(90, "Saving your site");
-    const commitMessage = revision?.revertToCommit
-      ? `Restore site to ${revision.revertToCommit.slice(0, 7)}`
-      : revision?.cleanRebuild
-        ? "Rebuild site from scratch"
-        : revision?.feedback
-          ? `Refine: ${revision.feedback}`
-          : "Build site";
+    const commitMessage = revision?.feedback
+      ? `Refine: ${revision.feedback}`
+      : "Build site";
     await git.commitAndPush(workspace, repo, commitMessage);
     const repoRevision = (await workspace.exec("git", ["rev-parse", "HEAD"])).stdout.trim();
     // Store recent git history so the control panel can show it.

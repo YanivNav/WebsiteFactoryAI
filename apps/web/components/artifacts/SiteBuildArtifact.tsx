@@ -26,8 +26,8 @@ export function SiteBuildArtifact({
 }) {
   const build = artifact.data;
   const { applyContent, busy } = useUserTask();
-  const rebuildSiteClean = useMutation(api.projects.rebuildSiteClean);
-  const revertSiteTo = useMutation(api.projects.revertSiteTo);
+  const rebuildSiteClean = useMutation(api.siteManagement.rebuildSiteClean);
+  const revertSiteTo = useMutation(api.siteManagement.revertSiteTo);
   // Git holds the site's version history: an older build can be restored.
   const isLatest = detail?.artifacts.siteBuild[0]?.id === artifact.id;
 

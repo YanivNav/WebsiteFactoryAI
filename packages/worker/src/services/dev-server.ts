@@ -36,6 +36,28 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
 }
 
+/**
+ * Drop lines that are just the CLI reprinting URLs or other repetitive noise.
+ * After the first URL is captured these lines carry no useful signal — they just
+ * push real errors and build output out of the visible log window.
+ */
+const NOISE_RES = [
+  // Local/network URL announcements — useful once, noise afterwards.
+  /^\s*(Local|Network|Wix):\s+https?:\/\//i,
+  // HTTP request log lines from the dev server's access-log output.
+  /^\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/\S*\s+\d{3}\s/,
+  // Connection status re-prints.
+  /^\s*(Watching|Ready|Compiled|Compiling)\b/i,
+  // Empty or whitespace-only lines.
+  /^\s*$/,
+  // Pure ANSI escape sequences (nothing left after stripping).
+  /^\x1b\[[\d;]*m$/,
+];
+
+function isNoise(line: string): boolean {
+  return NOISE_RES.some((re) => re.test(line));
+}
+
 interface RunningDev {
   child: BackgroundProcess;
   pending: DevLogLine[];
@@ -83,8 +105,9 @@ class DevServerManager {
       const onLine = (stream: "out" | "err") => (raw: string) => {
         // Keep ANSI escapes out of the stored logs AND out of the captured URL.
         const line = stripAnsi(raw);
-        record.pending.push({ stream, line });
-        if (record.pending.length >= LOG_FLUSH_LINES) this.flush(projectId, workerId);
+
+        // Detect the URL before noise filtering — the very first URL-announcement
+        // line is how we know the server is ready.
         if (!urlReported) {
           const match = line.match(LOCAL_URL_RE);
           if (match) {
@@ -96,6 +119,14 @@ class DevServerManager {
             done();
           }
         }
+
+        // After the first URL is captured, drop repetitive noise — URL reprints,
+        // HTTP access logs, and compilation status lines dominate the output and
+        // push useful errors out of view.
+        if (isNoise(line)) return;
+
+        record.pending.push({ stream, line });
+        if (record.pending.length >= LOG_FLUSH_LINES) this.flush(projectId, workerId);
       };
 
       const child = workspace.spawnBackground(

@@ -5,8 +5,55 @@ import {
   type Asset,
   type WorkOperation,
 } from "@factory/shared";
+import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+
+export const contentItemValidator = v.object({
+  key: v.string(),
+  label: v.string(),
+  kind: v.union(
+    v.literal("text"),
+    v.literal("longtext"),
+    v.literal("image"),
+    v.literal("logo"),
+    v.literal("setting"),
+  ),
+  page: v.optional(v.string()),
+  placeholder: v.optional(v.string()),
+  help: v.optional(v.string()),
+  helpLink: v.optional(v.string()),
+  helpUrl: v.optional(v.string()),
+  value: v.union(v.string(), v.null()),
+  assetId: v.optional(v.string()),
+});
+
+export async function getLatestBuild(ctx: QueryCtx | MutationCtx, projectId: Id<"projects">) {
+  return ctx.db
+    .query("artifacts")
+    .withIndex("by_project_and_type", (q) => q.eq("projectId", projectId).eq("type", "siteBuild"))
+    .order("desc")
+    .first();
+}
+
+export async function requireProject(ctx: MutationCtx, projectId: Id<"projects">) {
+  const project = await ctx.db.get(projectId);
+  if (!project) throw new Error("Project not found");
+  return project;
+}
+
+export async function cancelCurrentSiteAction(ctx: MutationCtx, projectId: Id<"projects">) {
+  const existing = await ctx.db
+    .query("siteActions")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .first();
+  if (existing) {
+    if (existing.status === "running") {
+      throw new Error("Wait for the current action to finish first");
+    }
+    await ctx.db.delete(existing._id);
+  }
+}
 
 export type WorkDraft = {
   phase: Doc<"works">["phase"];

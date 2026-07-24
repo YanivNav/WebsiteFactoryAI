@@ -10,6 +10,13 @@ import {
 export type ProjectId = string;
 export type WorkId = string;
 
+/** The subset of a work context that build services (code gen, Wix CLI) need. */
+export interface BuildContext {
+  log(level: "info" | "warn" | "error", message: string): void;
+  getFileUrl(storageId: string): Promise<string | null>;
+  progress(percent: number, message: string, data?: unknown): void;
+}
+
 export type WorkRevision = {
   mode: "initial" | "regenerate" | "revise";
   baseArtifactId?: string;
@@ -18,16 +25,6 @@ export type WorkRevision = {
   screenPath?: string;
   /** When set, a site-build revision bakes in this owner-content artifact. */
   contentArtifactId?: string;
-  /** When true, revert the generated code to the fresh scaffold before rebuilding. */
-  cleanRebuild?: boolean;
-  /** When set, restore the site's code to this git commit instead of generating. */
-  revertToCommit?: string;
-  /** When true, skip building and only start the dev server (a fast trigger). */
-  devOnly?: boolean;
-  /** When true, build the site and generate a fresh preview URL. */
-  previewOnly?: boolean;
-  /** When true, stop the project's running dev server (a fast trigger). */
-  stopDev?: boolean;
 };
 
 /** One line of streamed dev-server output. */
@@ -108,6 +105,38 @@ export type LeasedWork<K extends WorkOperation = WorkOperation> = LeasedWorkComm
   instruction: WorkInstruction<K>;
 };
 
+// ---- Site actions (control-panel management) ---------------------------------
+
+export type SiteActionType =
+  | "changeRequest"
+  | "cleanRebuild"
+  | "revertToCommit"
+  | "revertSiteTo"
+  | "applyContent"
+  | "screenChange"
+  | "preview"
+  | "startDev"
+  | "stopDev"
+  | "publish";
+
+export type LeasedSiteAction = {
+  id: string;
+  projectId: ProjectId;
+  projectTitle: string;
+  type: SiteActionType;
+  data: Record<string, unknown>;
+  approvedArtifactIds: Record<string, string>;
+  settings: { mode: "simple" | "developer"; publishTarget: string };
+};
+
+export type SiteActionCompletion = {
+  liveUrl?: string;
+  previewUrl?: string;
+  dashboardUrl?: string;
+  previewDashboardUrl?: string;
+  devUrl?: string;
+};
+
 export interface ServerAccess {
   leaseNextWork(workerId: string, ttlSeconds: number): Promise<LeasedWork | null>;
   renewLease(workId: WorkId, workerId: string): Promise<void>;
@@ -185,4 +214,27 @@ export interface ServerAccess {
     workerId: string;
     lines: DevLogLine[];
   }): Promise<void>;
+
+  // ---- Site actions ---------------------------------------------------------
+  leaseNextSiteAction(workerId: string, ttlSeconds: number): Promise<LeasedSiteAction | null>;
+  completeSiteAction(siteActionId: string, workerId: string, completion: SiteActionCompletion): Promise<void>;
+  failSiteAction(siteActionId: string, workerId: string, error: string, technicalDetails?: string): Promise<void>;
+  appendSiteActionLog(input: {
+    projectId: ProjectId;
+    siteActionId: string;
+    level: "info" | "warn" | "error";
+    message: string;
+    data?: Record<string, unknown>;
+  }): Promise<void>;
+  addSiteActionArtifact<T extends ArtifactType>(input: {
+    projectId: ProjectId;
+    siteActionId: string;
+    workerId: string;
+    outputKey: string;
+    type: T;
+    data: ArtifactData<T>;
+    basedOnArtifactId?: string;
+    assets?: ArtifactAsset[];
+  }): Promise<Artifact<T>>;
+  generateSiteActionUploadUrl(siteActionId: string, workerId: string): Promise<string>;
 }

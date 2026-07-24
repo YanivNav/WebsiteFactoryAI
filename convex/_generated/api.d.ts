@@ -9,6 +9,7 @@
  */
 
 import type * as projects from "../projects.js";
+import type * as siteManagement from "../site-management.js";
 import type * as utils from "../utils.js";
 import type * as worker from "../worker.js";
 
@@ -20,6 +21,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   projects: typeof projects;
+  siteManagement: typeof siteManagement;
   utils: typeof utils;
   worker: typeof worker;
 }>;

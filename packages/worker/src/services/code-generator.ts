@@ -3,6 +3,7 @@ import type { Design, Specification, WebsiteContent } from "@factory/shared";
 import { loadPrompt } from "../lib/prompts";
 import { buildAgentHomeFiles } from "../lib/skills";
 import type { WorkContext } from "../operations/context";
+import type { BuildContext } from "../server";
 import { ensureAgentHome, type Workspace } from "../workspace";
 
 /** What the agent raised for the owner while building, read back from its report. */
@@ -62,7 +63,7 @@ const EMPTY_REPORTS: BuildReports = { questions: [], manualTasks: [], content: [
  * work so they take precedence.
  */
 export class CodeGenerator {
-  async build(ctx: WorkContext, input: CodeBuildInput): Promise<{ summary: string; reports: BuildReports }> {
+  async build(ctx: BuildContext, input: CodeBuildInput): Promise<{ summary: string; reports: BuildReports }> {
     await this.writeBrief(input);
     const summary = await this.run(ctx, input.workspace, loadPrompt("build-task"));
     const reports = await this.readReport(input.workspace);
@@ -70,7 +71,7 @@ export class CodeGenerator {
   }
 
   /** Scoped change pass — uses refine-task.md instead of the full build prompt. */
-  async refine(ctx: WorkContext, input: CodeBuildInput): Promise<{ summary: string; reports: BuildReports }> {
+  async refine(ctx: BuildContext, input: CodeBuildInput): Promise<{ summary: string; reports: BuildReports }> {
     await this.writeBrief(input);
     ctx.log("info", "Refine: " + input.feedback)
     const summary = await this.run(ctx, input.workspace, loadPrompt("refine-task"));
@@ -80,7 +81,7 @@ export class CodeGenerator {
 
   /** One scoped repair pass over a failing build command. */
   async repair(
-    ctx: WorkContext,
+    ctx: BuildContext,
     input: { workspace: Workspace; summary: string; failure: { command: string; stdout: string; stderr: string } },
     reports: BuildReports,
   ): Promise<void> {
@@ -98,7 +99,7 @@ export class CodeGenerator {
   }
 
   /** Run the coding agent in the project directory until it finishes the task. */
-  private async run(ctx: WorkContext, workspace: Workspace, prompt: string): Promise<string> {
+  private async run(ctx: BuildContext, workspace: Workspace, prompt: string): Promise<string> {
     const codexHome = await ensureCodexHome(ctx);
     const codex = new Codex({
       apiKey: process.env.OPENAI_API_KEY,
@@ -286,7 +287,7 @@ function codexModel(): string {
  * Install the factory skills as the agent's GLOBAL instructions — one copy that
  * applies to every project we build and updates centrally when a skill changes.
  */
-async function ensureCodexHome(ctx: WorkContext): Promise<string> {
+async function ensureCodexHome(ctx: BuildContext): Promise<string> {
   const files = buildAgentHomeFiles();
   const home = await ensureAgentHome(files);
   ctx.log("info", `Factory skills installed as proper Codex skills (${home}, ${Object.keys(files).length} files)`);

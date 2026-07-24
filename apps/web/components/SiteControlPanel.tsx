@@ -95,9 +95,9 @@ function SiteHeader({
   projectId: Id<"projects">;
   builtAt?: number;
 }) {
-  const publishSite = useMutation(api.projects.publishSite);
-  const startPreview = useMutation(api.projects.startPreview);
-  const returnToBuildMode = useMutation(api.projects.returnToBuildMode);
+  const publishSite = useMutation(api.siteManagement.publishSite);
+  const startPreview = useMutation(api.siteManagement.startPreview);
+  const returnToBuildMode = useMutation(api.siteManagement.returnToBuildMode);
   const [publishing, setPublishing] = useState(false);
   const [generatingPreview, setGeneratingPreview] = useState(false);
 
@@ -223,8 +223,8 @@ function SiteHeader({
 
 /** The dev-server control: start it, open its live link, and stop it. */
 function DevButton({ projectId, session }: { projectId: Id<"projects">; session?: Doc<"devSessions"> }) {
-  const startDevServer = useMutation(api.projects.startDevServer);
-  const stopDevServer = useMutation(api.projects.stopDevServer);
+  const startDevServer = useMutation(api.siteManagement.startDevServer);
+  const stopDevServer = useMutation(api.siteManagement.stopDevServer);
   const [busy, setBusy] = useState(false);
   const openedRef = useRef<string | null>(null);
 
@@ -321,7 +321,7 @@ function ContentCard({
   content: { id: string; data: { items: ContentItemInput[] } };
   projectId: Id<"projects">;
 }) {
-  const applyContent = useMutation(api.projects.applyContentReady);
+  const applyContent = useMutation(api.siteManagement.applyContentReady);
   const [busy, setBusy] = useState(false);
 
   return (
@@ -341,7 +341,7 @@ function ContentCard({
 
 /** Plain-language change request: same pattern as the old SiteChangeRequest. */
 function ChangeRequestCard({ projectId }: { projectId: Id<"projects"> }) {
-  const requestSiteChange = useMutation(api.projects.requestSiteChange);
+  const requestSiteChange = useMutation(api.siteManagement.requestSiteChange);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -399,7 +399,7 @@ function GitHistoryCard({
   repoRevision?: string;
   commits?: Array<{ sha: string; message: string; date: string }>;
 }) {
-  const revertToCommit = useMutation(api.projects.revertToCommit);
+  const revertToCommit = useMutation(api.siteManagement.revertToCommit);
   const [reverting, setReverting] = useState<string | null>(null);
 
   if (!commits || commits.length === 0) {
@@ -498,7 +498,7 @@ function ScreensCard({
   detail: ProjectDetail;
   projectId: Id<"projects">;
 }) {
-  const requestScreenChange = useMutation(api.projects.requestScreenChange);
+  const requestScreenChange = useMutation(api.siteManagement.requestScreenChange);
   const design = detail.artifacts.design[0];
   const screens = design?.data?.screens ?? [];
 

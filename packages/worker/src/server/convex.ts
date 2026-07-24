@@ -1,7 +1,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { Artifact, ArtifactType } from "@factory/shared";
-import type { LeasedWork, ScreenRevisionRequest, ServerAccess, WorkCompletion, WorkId } from ".";
+import type { LeasedSiteAction, LeasedWork, ScreenRevisionRequest, ServerAccess, SiteActionCompletion, WorkCompletion, WorkId } from ".";
 
 const mutation = (name: string) => makeFunctionReference<"mutation">(name);
 const query = (name: string) => makeFunctionReference<"query">(name);
@@ -22,6 +22,12 @@ const functions = {
   startDevSession: mutation("worker:startDevSession"),
   updateDevSession: mutation("worker:updateDevSession"),
   appendDevLogs: mutation("worker:appendDevLogs"),
+  leaseNextSiteAction: mutation("worker:leaseNextSiteAction"),
+  completeSiteAction: mutation("worker:completeSiteAction"),
+  failSiteAction: mutation("worker:failSiteAction"),
+  appendSiteActionLog: mutation("worker:appendSiteActionLog"),
+  addSiteActionArtifact: mutation("worker:addSiteActionArtifact"),
+  generateSiteActionUploadUrl: mutation("worker:generateSiteActionUploadUrl"),
 } as const;
 
 export class ConvexServer implements ServerAccess {
@@ -138,5 +144,59 @@ export class ConvexServer implements ServerAccess {
 
   async appendDevLogs(input: Parameters<ServerAccess["appendDevLogs"]>[0]): Promise<void> {
     await this.client.mutation(functions.appendDevLogs, input);
+  }
+
+  // ---- Site actions ---------------------------------------------------------
+
+  async leaseNextSiteAction(workerId: string, ttlSeconds: number): Promise<LeasedSiteAction | null> {
+    return (await this.client.mutation(functions.leaseNextSiteAction, {
+      workerId,
+      ttlSeconds,
+    })) as LeasedSiteAction | null;
+  }
+
+  async completeSiteAction(
+    siteActionId: string,
+    workerId: string,
+    completion: SiteActionCompletion,
+  ): Promise<void> {
+    await this.client.mutation(functions.completeSiteAction, {
+      siteActionId,
+      workerId,
+      ...completion,
+    });
+  }
+
+  async failSiteAction(
+    siteActionId: string,
+    workerId: string,
+    error: string,
+    technicalDetails?: string,
+  ): Promise<void> {
+    await this.client.mutation(functions.failSiteAction, {
+      siteActionId,
+      workerId,
+      error,
+      technicalDetails,
+    });
+  }
+
+  async appendSiteActionLog(
+    input: Parameters<ServerAccess["appendSiteActionLog"]>[0],
+  ): Promise<void> {
+    await this.client.mutation(functions.appendSiteActionLog, input);
+  }
+
+  async addSiteActionArtifact<T extends ArtifactType>(
+    input: Parameters<ServerAccess["addSiteActionArtifact"]>[0],
+  ): Promise<Artifact<T>> {
+    return this.client.mutation(functions.addSiteActionArtifact, input) as Promise<Artifact<T>>;
+  }
+
+  async generateSiteActionUploadUrl(siteActionId: string, workerId: string): Promise<string> {
+    return (await this.client.mutation(functions.generateSiteActionUploadUrl, {
+      siteActionId,
+      workerId,
+    })) as string;
   }
 }

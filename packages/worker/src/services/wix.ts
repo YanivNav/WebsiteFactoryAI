@@ -1,4 +1,5 @@
 import type { WorkContext } from "../operations/context";
+import type { BuildContext } from "../server";
 import type { Workspace } from "../workspace";
 
 export interface ScaffoldedWixProject {
@@ -50,7 +51,7 @@ export interface MediaImport {
 export class WixService {
   private loggedIn = false;
 
-  async ensureLogin(ctx: WorkContext, workspace: Workspace): Promise<void> {
+  async ensureLogin(ctx: BuildContext, workspace: Workspace): Promise<void> {
     if (this.loggedIn) return;
     const apiKey = process.env.WIX_API_KEY;
     if (!apiKey) throw new Error("WIX_API_KEY must be set to provision Wix projects");
@@ -86,7 +87,7 @@ export class WixService {
    * inherited by the CLI it invokes, keeping the whole scaffold in agent mode.
    */
   async scaffoldManaged(
-    ctx: WorkContext,
+    ctx: BuildContext,
     workspace: Workspace,
     businessName: string,
   ): Promise<ScaffoldedWixProject> {
@@ -129,7 +130,7 @@ export class WixService {
    * the build stage, so this only marks the repository as a self-managed site.
    */
   async scaffoldSelfManaged(
-    ctx: WorkContext,
+    ctx: BuildContext,
     workspace: Workspace,
     businessName: string,
   ): Promise<void> {
@@ -231,7 +232,7 @@ export class WixService {
    * part of the scaffold — without this there is nothing for the code agent to
    * read. Best-effort: a failure here shouldn't fail the build.
    */
-  async ensureSkills(ctx: WorkContext, workspace: Workspace): Promise<void> {
+  async ensureSkills(ctx: BuildContext, workspace: Workspace): Promise<void> {
     const command = (await workspace.hasFile(".agents")) ? "update" : "add";
     ctx.log("info", `Installing Wix skills into the project (wix skills ${command})`);
     const result = await workspace.exec(
@@ -249,7 +250,7 @@ export class WixService {
    * supplies these as plain labelled fields in the app — they never touch env
    * vars themselves; the factory puts the value where the code expects it.
    */
-  async setEnv(ctx: WorkContext, workspace: Workspace, key: string, value: string): Promise<void> {
+  async setEnv(ctx: BuildContext, workspace: Workspace, key: string, value: string): Promise<void> {
     const result = await workspace.exec(
       "npx",
       ["--yes", "@wix/cli@latest", "env", "set", "--key", key, "--value", value],
@@ -271,7 +272,7 @@ export class WixService {
   // is always a real, site-scoped link instead of a truncated/guessed one.
 
   /** `wix preview` → a shareable preview URL for the built site. */
-  async preview(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string }> {
+  async preview(ctx: BuildContext, workspace: Workspace): Promise<{ siteUrl?: string }> {
     ctx.log("info", "Creating a Wix preview");
     const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "preview"], {
       env: AGENT_ENV,
@@ -283,7 +284,7 @@ export class WixService {
   }
 
   /** `wix release` → publishes and returns the live URL. */
-  async release(ctx: WorkContext, workspace: Workspace): Promise<{ siteUrl?: string }> {
+  async release(ctx: BuildContext, workspace: Workspace): Promise<{ siteUrl?: string }> {
     ctx.log("info", "Publishing the site with Wix");
     const result = await workspace.exec("npx", ["--yes", "@wix/cli@latest", "release"], {
       env: AGENT_ENV,
@@ -401,7 +402,7 @@ function collectUrls(events: AgentEvent[], output: string): UrlCandidate[] {
  * pick is diagnosable. Best-effort — returns nothing rather than a wrong guess.
  */
 function pickSiteUrl(
-  ctx: WorkContext,
+  ctx: BuildContext,
   events: AgentEvent[],
   output: string,
   intent: "preview" | "published" | "dev",

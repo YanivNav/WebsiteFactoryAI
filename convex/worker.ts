@@ -474,3 +474,176 @@ export const failWork = mutation({
     });
   },
 });
+
+// ---- Site actions (control-panel management) --------------------------------
+
+export const leaseNextSiteAction = mutation({
+  args: { workerId: v.string(), ttlSeconds: v.number() },
+  handler: async (ctx, { workerId, ttlSeconds }) => {
+    const now = Date.now();
+    const queued = await ctx.db
+      .query("siteActions")
+      .withIndex("by_status", (q) => q.eq("status", "queued"))
+      .collect();
+    const running = await ctx.db
+      .query("siteActions")
+      .withIndex("by_status", (q) => q.eq("status", "running"))
+      .collect();
+    const candidates = [...queued, ...running.filter((a) => (a.leaseExpiresAt ?? 0) < now)];
+
+    for (const action of candidates) {
+      const project = await ctx.db.get(action.projectId);
+      if (!project) {
+        await ctx.db.delete(action._id);
+        continue;
+      }
+      await ctx.db.patch(action._id, {
+        status: "running",
+        workerId,
+        leaseExpiresAt: now + ttlSeconds * 1000,
+        error: undefined,
+      });
+      return {
+        id: action._id,
+        projectId: project._id,
+        projectTitle: project.title,
+        type: action.type,
+        data: action.data,
+        approvedArtifactIds: project.approvedArtifacts,
+        settings: project.settings,
+      };
+    }
+    return null;
+  },
+});
+
+export const completeSiteAction = mutation({
+  args: {
+    siteActionId: v.id("siteActions"),
+    workerId: v.string(),
+    liveUrl: v.optional(v.string()),
+    previewUrl: v.optional(v.string()),
+    dashboardUrl: v.optional(v.string()),
+    previewDashboardUrl: v.optional(v.string()),
+    devUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, { siteActionId, workerId, ...urls }) => {
+    const action = await ctx.db.get(siteActionId);
+    if (!action || action.status !== "running" || action.workerId !== workerId) return;
+    const project = await ctx.db.get(action.projectId);
+    if (!project) return;
+
+    const wixPatch: Record<string, string | undefined> = {};
+    if (urls.previewUrl) wixPatch.previewUrl = urls.previewUrl;
+    if (urls.dashboardUrl) wixPatch.dashboardUrl = urls.dashboardUrl;
+    if (urls.previewDashboardUrl) wixPatch.previewDashboardUrl = urls.previewDashboardUrl;
+    if (urls.devUrl) wixPatch.devUrl = urls.devUrl;
+
+    // publish action that succeeded with a liveUrl moves the site to completed.
+    if (action.type === "publish" && urls.liveUrl) {
+      wixPatch.liveUrl = urls.liveUrl;
+      await ctx.db.patch(project._id, {
+        currentActivity: { type: "completed" as const },
+        ...(Object.keys(wixPatch).length > 0 && project.wix
+          ? { wix: { ...project.wix, ...wixPatch } }
+          : {}),
+      });
+    } else if (Object.keys(wixPatch).length > 0 && project.wix) {
+      await ctx.db.patch(project._id, { wix: { ...project.wix, ...wixPatch } });
+    }
+
+    await ctx.db.delete(siteActionId);
+  },
+});
+
+export const failSiteAction = mutation({
+  args: {
+    siteActionId: v.id("siteActions"),
+    workerId: v.string(),
+    error: v.string(),
+    technicalDetails: v.optional(v.string()),
+  },
+  handler: async (ctx, { siteActionId, workerId, error, technicalDetails }) => {
+    const action = await ctx.db.get(siteActionId);
+    if (!action || action.status !== "running" || action.workerId !== workerId) return;
+    await ctx.db.patch(siteActionId, {
+      status: "failed",
+      workerId: undefined,
+      leaseExpiresAt: undefined,
+      error: {
+        message: error,
+        technicalDetails,
+        retryable: true,
+        occurredAt: Date.now(),
+      },
+    });
+  },
+});
+
+export const appendSiteActionLog = mutation({
+  args: {
+    projectId: v.id("projects"),
+    siteActionId: v.id("siteActions"),
+    level: v.union(v.literal("info"), v.literal("warn"), v.literal("error")),
+    message: v.string(),
+    data: v.optional(v.any()),
+  },
+  handler: async (ctx, input) => {
+    const action = await ctx.db.get(input.siteActionId);
+    if (!action || action.status !== "running") return;
+    await ctx.db.insert("logs", {
+      projectId: input.projectId,
+      level: input.level,
+      message: input.message,
+      data: input.data,
+    });
+  },
+});
+
+export const generateSiteActionUploadUrl = mutation({
+  args: { siteActionId: v.id("siteActions"), workerId: v.string() },
+  handler: async (ctx, { siteActionId, workerId }) => {
+    const action = await ctx.db.get(siteActionId);
+    if (!action || action.status !== "running" || action.workerId !== workerId) {
+      throw new Error("Site action no longer owns this upload");
+    }
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
+export const addSiteActionArtifact = mutation({
+  args: {
+    projectId: v.id("projects"),
+    siteActionId: v.id("siteActions"),
+    workerId: v.string(),
+    outputKey: v.string(),
+    type: artifactTypeValidator,
+    data: v.any(),
+    basedOnArtifactId: v.optional(v.id("artifacts")),
+    assets: v.optional(
+      v.array(v.object({ id: v.string(), data: v.any(), storageId: v.id("_storage") })),
+    ),
+  },
+  handler: async (ctx, input) => {
+    const action = await ctx.db.get(input.siteActionId);
+    if (
+      !action ||
+      action.projectId !== input.projectId ||
+      action.status !== "running" ||
+      action.workerId !== input.workerId
+    ) {
+      throw new Error("Site action no longer owns this artifact output");
+    }
+    const artifactId = await insertArtifact(ctx, {
+      projectId: input.projectId,
+      type: input.type,
+      data: input.data,
+      basedOnArtifactId: input.basedOnArtifactId,
+      outputKey: input.outputKey,
+      assets: input.assets,
+    });
+    const artifact = await ctx.db.get(artifactId);
+    if (!artifact) throw new Error("Artifact could not be saved");
+    return resolveArtifact(ctx, artifact);
+  },
+});

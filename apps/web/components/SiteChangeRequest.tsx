@@ -14,8 +14,8 @@ import { ConfirmAction } from "./ConfirmAction";
  * site is presented as done (the live-site step and the resting project).
  */
 export function SiteChangeRequest({ detail }: { detail: ProjectDetail }) {
-  const requestSiteChange = useMutation(api.projects.requestSiteChange);
-  const rebuildSiteClean = useMutation(api.projects.rebuildSiteClean);
+  const requestSiteChange = useMutation(api.siteManagement.requestSiteChange);
+  const rebuildSiteClean = useMutation(api.siteManagement.rebuildSiteClean);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const projectId = detail.project._id as Id<"projects">;

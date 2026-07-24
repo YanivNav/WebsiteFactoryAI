@@ -17,18 +17,6 @@ export const revisionValidator = v.object({
   // refine loop's content-edit path). Carried on the revision rather than as a
   // work input so the standard input contract stays stable.
   contentArtifactId: v.optional(v.id("artifacts")),
-  // When true, a site-build reverts the generated code to the fresh scaffold
-  // before rebuilding — a clean regeneration in the same project.
-  cleanRebuild: v.optional(v.boolean()),
-  // When set, restore the site's code to this git commit instead of generating
-  // (git is the source of truth for site versions).
-  revertToCommit: v.optional(v.string()),
-  // When true, skip code generation and only start the dev server.
-  devOnly: v.optional(v.boolean()),
-  // When true, build the site and generate a fresh preview URL.
-  previewOnly: v.optional(v.boolean()),
-  // When true, stop the project's running dev server.
-  stopDev: v.optional(v.boolean()),
 });
 
 export const userTaskResultValidator = v.union(
@@ -213,4 +201,37 @@ export default defineSchema({
     stream: v.union(v.literal("out"), v.literal("err")),
     line: v.string(),
   }).index("by_project", ["projectId"]),
+
+  // Lightweight one-shot actions queued from the site control panel (preview, dev,
+  // content edit, change request, etc.). Rows are deleted on completion so the
+  // table never accumulates — only failed rows persist for retry.
+  siteActions: defineTable({
+    projectId: v.id("projects"),
+    type: v.union(
+      v.literal("changeRequest"),
+      v.literal("cleanRebuild"),
+      v.literal("revertToCommit"),
+      v.literal("revertSiteTo"),
+      v.literal("applyContent"),
+      v.literal("screenChange"),
+      v.literal("preview"),
+      v.literal("startDev"),
+      v.literal("stopDev"),
+      v.literal("publish"),
+    ),
+    status: v.union(v.literal("queued"), v.literal("running"), v.literal("failed")),
+    workerId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    data: v.any(),
+    error: v.optional(
+      v.object({
+        message: v.string(),
+        technicalDetails: v.optional(v.string()),
+        retryable: v.boolean(),
+        occurredAt: v.number(),
+      }),
+    ),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_status", ["status"]),
 });

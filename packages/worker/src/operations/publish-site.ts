@@ -21,8 +21,6 @@ export const publishSite: WorkHandler<"publishSite"> = {
     git ??= new GitService();
     wix ??= new WixService();
 
-    // Release from the project's checkout; restore it from the GitHub backup if
-    // the local workspace was lost.
     const workspace = new LocalWorkspace(folderName);
     if (!(await workspace.exists())) {
       const repo = await git.ensureRepo(folderName);
@@ -32,8 +30,6 @@ export const publishSite: WorkHandler<"publishSite"> = {
 
     await ctx.progress(40, "Publishing your site");
     const { siteUrl: liveUrl } = await wix.release(ctx, workspace);
-    // The dashboard link is derived from the real site id, not scraped from CLI
-    // output, so it's a reliable landing spot even if no live URL was reported.
     const liveDashboardUrl = wixDashboardUrl(siteId);
     if (!liveUrl) {
       ctx.log("warn", "Published, but no live site URL was found in the CLI output");
@@ -42,7 +38,6 @@ export const publishSite: WorkHandler<"publishSite"> = {
     const release: SiteRelease = { liveUrl, repoRevision: build.repoRevision };
     await ctx.progress(95, "Your site is live");
     const artifact = await ctx.addArtifact("siteRelease", "siteRelease", release);
-    // Publish always means "completed" — the site is live.
     return readyCompletion({ liveUrl: liveUrl ?? liveDashboardUrl, dashboardUrl: liveDashboardUrl });
   },
 };
