@@ -46,18 +46,26 @@ export function loadFactorySkill(name: string): FactorySkill | undefined {
 }
 
 /**
- * The document installed as the coding agent's GLOBAL `AGENTS.md` (in the
- * factory-owned CODEX_HOME): the operating rules plus every factory skill.
+ * Install the factory skills as proper Codex skill files under
+ * `.agents/skills/<name>/SKILL.md` in the agent home directory.
  *
- * Global means one copy for every project we build — edit a skill here and the
- * next build of every site picks it up. Wix's own per-project skills sit closer
- * to the work, so they layer on top of these.
+ * Codex loads skills from this directory structure (same pattern Wix's own
+ * `wix skills add` uses). Each skill is a self-contained SKILL.md with
+ * YAML frontmatter so Codex indexes and loads them on demand.
+ *
+ * The AGENTS.md is kept as the global operating instructions (code.md),
+ * referencing the skills the agent should read.
  */
-export function buildGlobalAgentsDoc(): string {
-  const sections = loadFactorySkills().map(
-    (skill) => `<!-- skill: ${skill.name} — ${skill.description} -->\n\n${skill.body}`,
-  );
-  return [loadPrompt("code"), ...sections].join("\n\n---\n\n") + "\n";
+export function buildAgentHomeFiles(): Record<string, string> {
+  const files: Record<string, string> = {};
+  files["AGENTS.md"] = loadPrompt("code");
+  for (const skill of loadFactorySkills()) {
+    const dir = `.agents/skills/${skill.name}`;
+    // Reconstruct full SKILL.md with frontmatter.
+    const frontmatter = `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n`;
+    files[`${dir}/SKILL.md`] = frontmatter + "\n" + skill.body;
+  }
+  return files;
 }
 
 /** Minimal `--- key: value ---` frontmatter parser (no YAML dependency). */
