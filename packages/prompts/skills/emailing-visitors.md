@@ -1,91 +1,75 @@
 ---
 name: emailing-visitors
-description: Send an email to a visitor/contact (confirmations, "send the syllabus", receipts). Read before implementing any send-email-after-an-action workflow.
+description: Send an email to a visitor/contact (confirmations, "send the syllabus", receipts, notifications). Read before implementing any send-email-after-an-action workflow.
 ---
 
 # Emailing a visitor
 
-Triggered emails are sent by a **Wix Automation**, not from your code directly.
-The pattern:
+Sending email to a visitor or contact is a **solved, programmatic capability** in
+Wix. Never hand this back to the owner as a manual task, and never conclude "there
+is no API" — there is. Your job is to discover the current one and call it.
 
-1. Create or update the CRM **contact** for the visitor (name, email, …) using
-   the regular SDK (`@wix/crm`, `auth.elevate`).
-2. Save the event into a CMS collection (the request details, submitted form
-   data, …).
-3. Create the **Automation** that fires on new items in that collection and
-   sends the triggered email — via the Wix Automations REST API (discover it
-   fresh each build, below).
+`@wix/site-*` packages are Velo host modules and do **not** work in Headless.
+Never import them. Everything below is done from backend code via REST.
 
-## Why not `@wix/site-crm`
+## Find the right API (don't assume — search)
 
-`@wix/site-crm` (`triggeredEmails.emailContact`) is a **Velo host module** —
-it needs a Wix platform runtime channel and does not work in Headless API
-routes. `auth.elevate()` only wraps REST modules; it cannot provide the
-platform channel a host module needs. Calling it throws either `Cannot read
-properties of undefined (reading 'invoke')` (no channel) or `Wix context is
-not available` (no platform runtime).
+Wix's APIs change, so discover the current shape with the `wix-docs` skill instead
+of trusting memory. There are two families to search for, in order of preference:
 
-**Never import `@wix/site-crm` or any `@wix/site-*` package in a Headless
-project.** They are Velo host modules that cannot work here.
+1. **Direct send** — a one-off email straight to a contact/email address when an
+   action happens (the confirmation/receipt/"send X" case). Search the docs for
+   terms like *send email to contact*, *transactional email*, *email transmission*.
+   This is usually the right tool: you call it inline from your backend route when
+   the visitor does the thing, no dashboard setup required.
+2. **Automations** — a trigger your code fires, whose action sends the mail. See
+   the `automations` skill; you create the automation yourself. Heavier than a
+   direct send, but it goes through Wix's triggered-email pipeline, which is a
+   **different delivery path**. That matters: if direct sends report success yet
+   never arrive, this route is the alternative worth trying — the problem is the
+   pipeline, not your code.
 
-## The Automations REST API (discover it — don't hardcode)
+For whichever you pick, read the method schema before calling it — confirm the
+endpoint, required fields (sender identity, recipient, subject, HTML body), and
+whether the sender address must be verified first (search *sender details* /
+*verify sender* if the send is rejected).
 
-The Wix Automations REST API lets you create automations programmatically.
-The agent discovers the current endpoint, app IDs, and trigger/action keys at
-build time — never from memory.
+## A successful send call is NOT a delivered email
 
-### Discovery workflow
+A send that returns `ACCEPTED` only means *queued*. The real outcome (processed
+or rejected) appears afterwards, so never treat the call returning as proof the
+email arrived — and never report success on that basis.
 
-1. **Search for the API.** Use the `wix-docs` skill to search for the
-   Automations REST endpoint:
-   - Semantic search: `"create automation"` with `document_type: "REST"`
-   - Or browse from `https://dev.wix.com/docs/api-reference.md` looking for
-     the automations service
-   - Read the method page that matches (likely `POST …/v2/automations` or
-     similar) and confirm the request shape
+To find out what actually happened, look the transmission up by its id after
+sending. Its status moves on to *processed* — where each recipient carries its
+own failure reason (address missing, invalid, previously bounced, consent not
+given…) — or *rejected*, where the rejection reasons say why. That per-recipient
+reason is the real answer when mail doesn't arrive; search the docs for the
+current method rather than assuming.
 
-2. **Find the app IDs.** The preinstalled Wix apps and their `appDefId`s
-   are in the `wix-headless` skill's `SETUP.md` (read it from the
-   project's `.agents/skills/wix-headless/references/SETUP.md`). For
-   apps not listed there, curl the "Apps Created by Wix" page:
-   `https://dev.wix.com/docs/api-reference/articles/work-with-wix-apis/platform/about-apps-created-by-wix.md`
-   The CRM app (triggered emails) and Wix Data app (CMS collection
-   triggers) are preinstalled — their IDs are discoverable.
+A sender address is **optional**: omit it and Wix sends from its own default
+address. If you do pass one it must be verified, or the send is refused. Verifying
+an address needs a code emailed to that inbox, so that is a genuine manual task
+for the owner — never invent a sender address the site can't actually send from.
 
-3. **Find the trigger and action keys.** Search the docs for the specific
-   building blocks you need:
-   - For a "new CMS item" trigger, search `"data collection item created trigger"`
-   - For the "send email" action, search `"triggered email action automation"`
-   - Read the method page's schema to confirm the `triggerKey` and
-     `actionKey` values, and the `inputMapping` shape
+Sending and *arriving* are different problems. A site with no custom domain can
+still send — Wix falls back to its own default from-address — so never tell the
+owner they need a domain to send email. When the owner says "the email never
+arrived", check the transmission first. **If it reports success, the code is
+working**: the problem is deliverability (spam filtering, sender/domain
+reputation) or the platform itself, and none of that is fixed by rewriting the
+route. Report what the transmission actually says instead of rebuilding code
+that is already correct.
 
-4. **Mint a token and make the call.** Follow the REST call shape from
-   `wix-headless`'s `AUTHENTICATION.md` for your project type (managed:
-   `npx @wix/cli@latest token --site "$SITE_ID"`):
+## Making REST calls
 
-   ```
-   POST https://www.wixapis.com/automations-service/v2/automations
-   Authorization: Bearer $TOKEN
-   wix-site-id: $SITE_ID
-   ```
-
-### If the API works
-
-Report the created automation in the build report (no manual task needed).
-
-### If the API genuinely doesn't work
-
-Only after you've searched the docs, confirmed the endpoint, and the call
-fails with a non-recoverable error, fall back to a **manual task** with
-`helpLink: "triggeredEmails"` telling the owner to create the Automation
-in the dashboard. But this is the last resort — try the REST API first.
+- Get a site-scoped token: `npx @wix/cli@latest token --site "$SITE_ID"`.
+- Use `Authorization: Bearer $TOKEN` + `wix-site-id: $SITE_ID` headers.
+- Read `.agents/skills/wix-headless/references/` for the full auth pattern.
 
 ## Rules
 
-- **Never import `@wix/site-crm`** in a Headless project — it's a platform
-  host module that can't work here.
-- One contact, used as the recipient — no orphan contacts.
-- Emails only send to contacts whose subscription status is subscribed or
-  not-set.
-- Discover the Automations endpoint, app IDs, and trigger/action keys at
-  build time — never hardcode them from a previous build.
+- Never import any `@wix/site-*` package.
+- Email only contacts whose subscription status is subscribed or not-set.
+- Only report a manual task after you've searched the docs and confirmed no
+  programmatic path exists — which, for sending email, should not happen.

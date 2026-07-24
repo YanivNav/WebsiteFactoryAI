@@ -17,6 +17,7 @@ export type PromptName =
   | "wix-setup"
   | "code"
   | "build-task"
+  | "refine-task"
   | "fix"
   | "qa-repair"
   | "site-agents";
